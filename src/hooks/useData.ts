@@ -1,33 +1,62 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, getToken } from '../api';
+import { db } from '../db';
+import { ensureLocalSeed, flushOutbox, onSyncChange, pullSnapshot } from '../sync';
 import type { Entry, Link, User } from '../types';
 
 /**
- * 用户数据加载。
- * 修复原实现的问题：原代码只在组件挂载时拉取一次，登录发生在挂载之后，
- * 导致登录后列表为空、必须刷新页面才能看到数据。
- * 现在以 user 为依赖：登录（或会话恢复）后自动拉取。
+ * 用户数据加载（本地优先）：
+ * 界面数据始终来自 IndexedDB；登录后先尝试拉取服务器快照（失败则用本地/兜底知识包），
+ * 再推送待同步队列。监听同步事件与网络恢复，自动刷新界面与推送。
  */
 export function useData(user: User | null) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [links, setLinks] = useState<Link[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   const refresh = useCallback(async () => {
-    if (!getToken()) return;
-    setLoading(true);
-    try {
-      const [e, l] = await Promise.all([api.entries(), api.links()]);
-      setEntries(e);
-      setLinks(l);
-    } finally {
-      setLoading(false);
-    }
+    const [e, l, p] = await Promise.all([db.entries.toArray(), db.links.toArray(), db.outbox.count()]);
+    setEntries(e.filter(x => !x.deletedAt));
+    setLinks(l);
+    setPendingCount(p);
   }, []);
 
-  useEffect(() => {
-    if (user) void refresh();
-  }, [user, refresh]);
+  const syncAll = useCallback(async () => {
+    try {
+      await pullSnapshot();
+    } catch {
+      // 离线：保留本地数据；本地为空时用打包的默认知识库兜底
+      await ensureLocalSeed();
+    }
+    await flushOutbox();
+    await refresh();
+  }, [refresh]);
 
-  return { entries, links, loading, refresh };
+  useEffect(() => {
+    if (!user) return;
+    setLoading(true);
+    void (async () => {
+      await syncAll();
+      setLoading(false);
+    })();
+  }, [user, syncAll]);
+
+  useEffect(() => {
+    const off = onSyncChange(() => void refresh());
+    const goOnline = () => {
+      setOnline(true);
+      void syncAll();
+    };
+    const goOffline = () => setOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      off();
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, [refresh, syncAll]);
+
+  return { entries, links, loading, refresh, pendingCount, online };
 }

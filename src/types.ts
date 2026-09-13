@@ -54,6 +54,12 @@ export interface Entry {
   createdAt: number;
   updatedAt: number;
   version?: number;
+  /** 本地软删除标记（同步队列专用，删除同步成功后移除） */
+  deletedAt?: number;
+  /** 同步冲突标记：本地与服务器版本不一致，等待用户裁决 */
+  conflict?: boolean;
+  /** 冲突时的服务器版本（供"采用云端版"恢复） */
+  serverCopy?: Entry;
 }
 
 /** 编辑器/创建接口使用的草稿：不含服务端生成的字段 */
@@ -83,6 +89,7 @@ export interface Link {
 }
 
 export interface LinkInput {
+  id?: string;
   sourceId: string;
   targetId: string;
   relationType?: string;

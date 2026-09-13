@@ -4,6 +4,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import VoidBadge from '../components/VoidBadge';
 import { COLORS, TYPES, VOIDS } from '../data';
+import { db } from '../db';
+import { removeEntry, resolveConflict, saveEntry } from '../store';
 import type { Entry, EntryDraft, ExperienceType, Suggestion, VoidId } from '../types';
 
 const emptyDraft = (): EntryDraft => ({
@@ -32,10 +34,13 @@ const toDraft = (e: Entry): EntryDraft => ({
   privacy: e.privacy ?? {},
 });
 
+const fmt = (t: number) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(t);
+
 export default function EditorPage({ refresh }: { refresh: () => Promise<void> }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [draft, setDraft] = useState<EntryDraft>(emptyDraft);
+  const [full, setFull] = useState<Entry | null>(null); // 完整条目（含冲突/版本字段）
   const [loading, setLoading] = useState(id !== 'new');
   const [error, setError] = useState('');
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
@@ -45,10 +50,18 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
       setLoading(false);
       return;
     }
-    api.entry(id)
-      .then(e => setDraft(toDraft(e)))
-      .catch(e => setError(e instanceof Error ? e.message : '载入失败'))
-      .finally(() => setLoading(false));
+    // 本地优先：从 IndexedDB 读取（离线也可编辑）
+    void (async () => {
+      const e = await db.entries.get(id);
+      if (!e || e.deletedAt) {
+        setError('未找到条目');
+        setLoading(false);
+        return;
+      }
+      setFull(e);
+      setDraft(toDraft(e));
+      setLoading(false);
+    })();
   }, [id]);
 
   const update = <K extends keyof EntryDraft>(k: K, v: EntryDraft[K]) => setDraft(d => ({ ...d, [k]: v }));
@@ -57,11 +70,37 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
     e.preventDefault();
     setError('');
     try {
-      const r = id === 'new' || !id ? await api.create(draft) : await api.update(id, draft);
+      const saved = await saveEntry(id === 'new' || !id ? 'new' : id, draft);
       await refresh();
-      nav('/experience/' + r.id);
+      nav('/experience/' + saved.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
+    }
+  };
+
+  const del = async () => {
+    if (!id) return;
+    if (!window.confirm('确定删除这条经历？删除会先保存在本地，联网后同步到服务器。')) return;
+    await removeEntry(id);
+    await refresh();
+    nav('/experiences');
+  };
+
+  const keepLocal = async () => {
+    if (!id) return;
+    const next = await resolveConflict(id, 'local');
+    if (next) {
+      setFull(next);
+      setDraft(toDraft(next));
+    }
+  };
+
+  const useServer = async () => {
+    if (!id) return;
+    const next = await resolveConflict(id, 'server');
+    if (next) {
+      setFull(next);
+      setDraft(toDraft(next));
     }
   };
 
@@ -84,11 +123,23 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
           <h1>{id === 'new' ? '记录经历' : '编辑条目'}</h1>
         </div>
         <div className="actions">
+          {id !== 'new' && <button type="button" className="secondary danger" onClick={del}>删除</button>}
           {id !== 'new' && <button type="button" className="secondary" onClick={ai}>AI 协助编码</button>}
           <button className="primary">保存</button>
         </div>
       </header>
       {error && <p className="error">{error}</p>}
+      {full?.conflict && full.serverCopy && (
+        <div className="suggestion">
+          <b>⚠ 同步冲突</b>
+          <p>此条目在另一处被修改过。云端版本：{fmt(full.serverCopy.updatedAt)}，标题"{full.serverCopy.title}"。</p>
+          <p>请裁决：保留哪个版本？未裁决前，本地版本仍会继续使用。</p>
+          <div className="actions">
+            <button type="button" className="secondary" onClick={keepLocal}>保留本地版</button>
+            <button type="button" className="secondary" onClick={useServer}>采用云端版</button>
+          </div>
+        </div>
+      )}
       <div className="editor-grid">
         <section className="paper">
           <label>经历类型

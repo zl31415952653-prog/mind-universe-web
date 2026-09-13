@@ -10,24 +10,29 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.js",
-    "check": "tsc --noEmit && vite build"
+    "check": "tsc --noEmit && vite build",
+    "smoke": "tsx scripts/sync-smoke.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "dexie": "^4.4.6",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.1"
+    "react-router-dom": "^6.28.1",
+    "vite-plugin-pwa": "^0.20.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
+    "fake-indexeddb": "^6.2.5",
+    "tsx": "^4.23.13",
     "typescript": "^5.6.2",
     "vite": "^5.4.11"
   }

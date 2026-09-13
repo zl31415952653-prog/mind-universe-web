@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
-import { api, getToken, setToken } from './api';
+import { api, ApiError, getToken, setToken } from './api';
 import Shell from './components/Shell';
+import { getMeta } from './db';
 import { useData } from './hooks/useData';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
@@ -18,7 +19,20 @@ export default function App() {
   const data = useData(user);
 
   useEffect(() => {
-    if (getToken()) api.me().then(setUser).catch(() => setToken(null));
+    // 会话恢复：有令牌先尝试在线校验；网络不可用时使用本地缓存的会话（离线模式）
+    void (async () => {
+      if (!getToken()) return;
+      try {
+        setUser(await api.me());
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          setToken(null); // 令牌失效
+          return;
+        }
+        const cached = await getMeta<User>('user');
+        if (cached) setUser(cached);
+      }
+    })();
   }, []);
 
   if (!user) return <AuthPage onAuth={setUser} />;
@@ -29,7 +43,7 @@ export default function App() {
   };
 
   return (
-    <Shell user={user} onLogout={logout}>
+    <Shell user={user} onLogout={logout} online={data.online} pendingCount={data.pendingCount}>
       <Routes>
         <Route path="/" element={<DashboardPage entries={data.entries} links={data.links} />} />
         <Route path="/universe" element={<DashboardPage entries={data.entries} links={data.links} />} />

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, setToken } from '../api';
+import { setMeta } from '../db';
 import type { User } from '../types';
 
 export default function AuthPage({ onAuth }: { onAuth: (u: User) => void }) {
@@ -16,6 +17,7 @@ export default function AuthPage({ onAuth }: { onAuth: (u: User) => void }) {
         ? await api.register(form.email, form.password, form.displayName)
         : await api.login(form.email, form.password);
       setToken(r.token);
+      await setMeta('user', r.user); // 缓存会话，供离线模式恢复
       onAuth(r.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : '认证失败');

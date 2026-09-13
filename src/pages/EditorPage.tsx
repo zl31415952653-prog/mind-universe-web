@@ -262,6 +262,7 @@ export default function EditorPage({ refresh, entries, links }: { refresh: () =>
           <h1>{id === 'new' ? '记录经历' : '编辑条目'}</h1>
         </div>
         <div className="actions">
+          <button type="button" className="secondary" onClick={() => nav(-1)}>← 返回</button>
           {id !== 'new' && <button type="button" className="secondary danger" onClick={del}>删除</button>}
           {id !== 'new' && <button type="button" className="secondary" onClick={ai}>AI 协助编码</button>}
           <button className="primary">保存</button>

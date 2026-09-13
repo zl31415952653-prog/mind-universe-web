@@ -126,6 +126,7 @@ export default function KnowledgeEditorPage({ refresh, knowledge, entries }: {
           <h1>{id === 'new' ? '新建知识' : '编辑知识'}</h1>
         </div>
         <div className="actions">
+          <button type="button" className="secondary" onClick={() => nav(-1)}>← 返回</button>
           {id !== 'new' && !full?.isDefault && <button type="button" className="secondary danger" onClick={del}>删除</button>}
           <button className="primary">保存</button>
         </div>

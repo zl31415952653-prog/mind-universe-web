@@ -3,8 +3,9 @@ import type { ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import KnowledgeCard from '../components/KnowledgeCard';
 import { VOIDS } from '../data';
+import { importVaultFiles } from '../obsidianImport';
 import { importKnowledge } from '../store';
-import type { KnowledgeEntry } from '../types';
+import type { KnowledgeEntry, VoidId } from '../types';
 
 /**
  * 知识库页（第 4 轮独立化）：
@@ -17,6 +18,9 @@ export default function KnowledgeListPage({ knowledge, refresh }: { knowledge: K
   const [voidFilter, setVoidFilter] = useState('');
   const [origin, setOrigin] = useState(''); // '' 全部 | default | mine
   const [importMsg, setImportMsg] = useState('');
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [vaultDomain, setVaultDomain] = useState('心理健康');
+  const [vaultVoid, setVaultVoid] = useState<VoidId>('silence');
 
   const domains = useMemo(() => [...new Set(knowledge.map(k => k.domain).filter(Boolean))].sort(), [knowledge]);
 
@@ -60,6 +64,21 @@ export default function KnowledgeListPage({ knowledge, refresh }: { knowledge: K
     }
   };
 
+  const importVault = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    setImportMsg('');
+    try {
+      const r = await importVaultFiles(files, { domain: vaultDomain || '未分类', voidType: vaultVoid });
+      await refresh();
+      setVaultOpen(false);
+      setImportMsg(`已从 Obsidian 文件夹导入 ${r.imported} 条知识（跳过 ${r.skipped} 个重复/无效文件，双链保留）。`);
+    } catch {
+      setImportMsg('文件夹导入失败：请选择 Obsidian vault 文件夹');
+    }
+  };
+
   return (
     <>
       <header className="page-head">
@@ -68,6 +87,7 @@ export default function KnowledgeListPage({ knowledge, refresh }: { knowledge: K
           <h1>知识库</h1>
         </div>
         <div className="actions">
+          <button className="secondary" onClick={() => setVaultOpen(!vaultOpen)}>导入 Obsidian 文件夹</button>
           <label className="secondary file-btn">
             导入 JSON
             <input type="file" accept="application/json,.json" onChange={importFile} />
@@ -76,6 +96,22 @@ export default function KnowledgeListPage({ knowledge, refresh }: { knowledge: K
           <Link className="primary" to="/knowledge/new">+ 新建知识</Link>
         </div>
       </header>
+      {vaultOpen && (
+        <div className="vault-import">
+          <label>领域
+            <input placeholder="如：心理健康" value={vaultDomain} onChange={e => setVaultDomain(e.target.value)} />
+          </label>
+          <label>七空归属
+            <select value={vaultVoid} onChange={e => setVaultVoid(e.target.value as VoidId)}>
+              {VOIDS.map(v => <option key={v.id} value={v.id}>{v.symbol} {v.name}</option>)}
+            </select>
+          </label>
+          <label className="secondary file-btn">
+            选择 vault 文件夹（读取 .md，保留双链，按内容去重）
+            <input type="file" onChange={importVault} {...({ webkitdirectory: '' } as object)} />
+          </label>
+        </div>
+      )}
       {importMsg && <p className="notice">{importMsg}</p>}
       <div className="filters">
         <input placeholder="搜索标题、正文或标签" value={q} onChange={e => setQ(e.target.value)} />

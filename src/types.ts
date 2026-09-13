@@ -180,9 +180,13 @@ export interface LinkInput {
 
 export interface SuggestionPayload {
   primaryVoid: VoidId;
+  secondaryVoids?: VoidId[];
   tags: string[];
-  color: string;
+  color?: string;        // 色卡色名
   emotionLabel?: string;
+  emotionValence?: number;
+  emotionIntensity?: number;
+  keywords?: string[];
   reason: string;
 }
 
@@ -192,6 +196,38 @@ export interface Suggestion {
   payload: SuggestionPayload;
   status: string;
   createdAt: number;
+  provider?: string;
+}
+
+/** AI 关系发现候选边（确认前不进入正式图谱） */
+export interface CandidateLink {
+  sourceId: string;
+  targetId: string;
+  relationType: RelationType;
+  strength: number;
+  reason: string;
+}
+
+export interface Discovery {
+  id: string;
+  payload: { links: CandidateLink[] };
+  status: string;
+  createdAt: number;
+  provider?: string;
+  reason?: string;
+}
+
+/** AI 学习计划 */
+export interface LearnChunk {
+  title: string;
+  description: string;
+  days: number;
+}
+
+export interface LearnPlan {
+  chunks: LearnChunk[];
+  reviewAdvice: string;
+  cognitiveLoadNote: string;
 }
 
 export interface User {

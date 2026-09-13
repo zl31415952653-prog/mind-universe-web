@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
@@ -6,7 +6,7 @@ import ColorPicker from '../components/ColorPicker';
 import Markdown from '../components/Markdown';
 import VoidBadge from '../components/VoidBadge';
 import VoidDetail from '../components/VoidDetail';
-import { TYPES, VOIDS } from '../data';
+import { COLORS, TYPES, VOIDS } from '../data';
 import { db } from '../db';
 import { ALL_EMOTIONS, EMOTIONS_NEGATIVE, EMOTIONS_POSITIVE } from '../emotions';
 import { backlinksOf } from '../links';
@@ -74,6 +74,7 @@ export default function EditorPage({ refresh, entries, links }: { refresh: () =>
   const [linkTarget, setLinkTarget] = useState('');
   const [linkType, setLinkType] = useState<RelationType>('similar');
   const [linkDesc, setLinkDesc] = useState('');
+  const appliedSuggestion = useRef(false);
 
   useEffect(() => {
     if (id === 'new' || !id) {
@@ -118,11 +119,57 @@ export default function EditorPage({ refresh, entries, links }: { refresh: () =>
     setError('');
     try {
       const saved = await saveEntry(id === 'new' || !id ? 'new' : id, draft);
+      if (suggestion && appliedSuggestion.current) {
+        void api.suggestStatus(suggestion.id, 'accepted').catch(() => { /* 离线时状态稍后不可追溯，可接受 */ });
+      }
       await refresh();
       nav('/experience/' + saved.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
     }
+  };
+
+  // ---- AI 建议的确认工作流：逐项应用 / 全部应用 / 忽略 ----
+  const p = suggestion?.payload;
+  const markApplied = () => { appliedSuggestion.current = true; };
+  const applyVoid = () => {
+    if (!p) return;
+    update('primaryVoid', p.primaryVoid);
+    markApplied();
+  };
+  const applyEmotion = () => {
+    if (!p) return;
+    update('emotion', {
+      ...draft.emotion,
+      label: p.emotionLabel ?? draft.emotion.label,
+      valence: p.emotionValence ?? draft.emotion.valence,
+      intensity: p.emotionIntensity ?? draft.emotion.intensity,
+    });
+    markApplied();
+  };
+  const applyColor = () => {
+    if (!p?.color) return;
+    const c = COLORS.find(x => x.name === p.color);
+    if (c) {
+      update('encoding', { ...draft.encoding, color: c });
+      markApplied();
+    }
+  };
+  const applyTags = () => {
+    if (!p) return;
+    update('tags', [...new Set([...draft.tags, ...p.tags])]);
+    markApplied();
+  };
+  const applyAll = () => {
+    applyVoid();
+    applyEmotion();
+    applyColor();
+    applyTags();
+  };
+  const dismissSuggestion = async () => {
+    if (!suggestion) return;
+    await api.suggestStatus(suggestion.id, 'rejected').catch(() => { /* ignore */ });
+    setSuggestion(null);
   };
 
   const del = async () => {
@@ -350,11 +397,23 @@ export default function EditorPage({ refresh, entries, links }: { refresh: () =>
           <small>AI 只会提出建议；保存分类或关系始终由你决定。</small>
           {suggestion && (
             <div className="suggestion">
-              <b>待确认建议</b>
+              <b>待确认建议 {suggestion.provider && suggestion.provider !== 'local-heuristic' ? '（AI 模型）' : '（本地启发式）'}</b>
               <p>{suggestion.payload.reason}</p>
-              <p>主空：<VoidBadge id={suggestion.payload.primaryVoid} /></p>
-              <p>标签：{suggestion.payload.tags.join('、') || '无'}</p>
-              {suggestion.payload.emotionLabel && <p>情绪：{suggestion.payload.emotionLabel}</p>}
+              <div className="suggest-row"><span>主空：<VoidBadge id={suggestion.payload.primaryVoid} /></span><button type="button" onClick={applyVoid}>应用</button></div>
+              {suggestion.payload.emotionLabel && (
+                <div className="suggest-row"><span>情绪：{suggestion.payload.emotionLabel}（效价 {Number(suggestion.payload.emotionValence ?? 0).toFixed(1)}）</span><button type="button" onClick={applyEmotion}>应用</button></div>
+              )}
+              {suggestion.payload.color && (
+                <div className="suggest-row"><span>色块：{suggestion.payload.color}</span><button type="button" onClick={applyColor}>应用</button></div>
+              )}
+              {suggestion.payload.tags.length > 0 && (
+                <div className="suggest-row"><span>标签：{suggestion.payload.tags.join('、')}</span><button type="button" onClick={applyTags}>应用</button></div>
+              )}
+              <div className="actions">
+                <button type="button" className="secondary" onClick={applyAll}>全部应用</button>
+                <button type="button" className="text" onClick={dismissSuggestion}>忽略</button>
+              </div>
+              <small>应用后点"保存"才写入你的宇宙；AI 不会自动修改任何数据。</small>
             </div>
           )}
           {id !== 'new' && (

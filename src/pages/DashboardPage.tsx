@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import EntryCard from '../components/EntryCard';
 import Universe3D from '../components/Universe3D';
 import { VOIDS } from '../data';
-import type { Entry, Link as LinkItem } from '../types';
+import type { Discovery, Entry, Link as LinkItem } from '../types';
 
 /** 七空分布：横向条形图（第 5 轮仪表盘升级） */
 function VoidDistribution({ entries }: { entries: Entry[] }) {
@@ -77,9 +77,10 @@ function EmotionHeatmap({ entries }: { entries: Entry[] }) {
   );
 }
 
-export default function DashboardPage({ entries, links }: { entries: Entry[]; links: LinkItem[] }) {
+export default function DashboardPage({ entries, links, discoveries }: { entries: Entry[]; links: LinkItem[]; discoveries: Discovery[] }) {
   const mine = entries.filter(e => !e.isDefault);
   const [immersive, setImmersive] = useState(false);
+  const aiLinks = discoveries.flatMap(d => d.payload.links);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -94,7 +95,7 @@ export default function DashboardPage({ entries, links }: { entries: Entry[]; li
       {immersive && (
         <div className="immersive">
           <button className="imm-close" onClick={() => setImmersive(false)}>✕ 退出沉浸（Esc）</button>
-          <Universe3D entries={entries} links={links} immersive />
+          <Universe3D entries={entries} links={links} aiLinks={aiLinks} immersive />
         </div>
       )}
       <header className="page-head">
@@ -108,7 +109,7 @@ export default function DashboardPage({ entries, links }: { entries: Entry[]; li
           <Link className="primary" to="/experience/new">+ 记录经历</Link>
         </div>
       </header>
-      <Universe3D entries={entries} links={links} />
+      <Universe3D entries={entries} links={links} aiLinks={aiLinks} />
       <section className="void-stats">
         {VOIDS.map(v => (
           <div key={v.id} style={{ borderColor: v.color }}>

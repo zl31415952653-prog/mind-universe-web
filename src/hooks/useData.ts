@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { api } from '../api';
 import { db } from '../db';
 import { ensureLocalSeed, flushOutbox, onSyncChange, pullSnapshot } from '../sync';
-import type { Entry, KnowledgeEntry, Link, User } from '../types';
+import type { Discovery, Entry, KnowledgeEntry, Link, User } from '../types';
 
 /**
  * 用户数据加载（本地优先）：
@@ -12,6 +13,7 @@ export function useData(user: User | null) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [links, setLinks] = useState<Link[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
+  const [discoveries, setDiscoveries] = useState<Discovery[]>([]);
   const [loading, setLoading] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -24,16 +26,25 @@ export function useData(user: User | null) {
     setPendingCount(p);
   }, []);
 
+  const refreshDiscoveries = useCallback(async () => {
+    try {
+      setDiscoveries(await api.discoveries());
+    } catch {
+      // 离线或未接入：忽略
+    }
+  }, []);
+
   const syncAll = useCallback(async () => {
     try {
       await pullSnapshot();
+      await refreshDiscoveries();
     } catch {
       // 离线：保留本地数据；本地为空时用打包的默认知识库兜底
       await ensureLocalSeed();
     }
     await flushOutbox();
     await refresh();
-  }, [refresh]);
+  }, [refresh, refreshDiscoveries]);
 
   useEffect(() => {
     if (!user) return;
@@ -60,5 +71,5 @@ export function useData(user: User | null) {
     };
   }, [refresh, syncAll]);
 
-  return { entries, links, knowledge, loading, refresh, pendingCount, online };
+  return { entries, links, knowledge, discoveries, loading, refresh, refreshDiscoveries, pendingCount, online };
 }

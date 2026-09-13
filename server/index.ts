@@ -8,6 +8,7 @@ import multer from 'multer';
 import db, { uploadsRoot } from './db.js';
 import { defaultKnowledge } from './defaultKnowledge.js';
 import { requireUser, tokenFor } from './auth.js';
+import { chatJson, getAiConfig } from './ai.js';
 import type { AttachmentMeta, AttachmentRow, EntryRow, KnowledgeRow, LinkRow, UserRow, VersionRow } from './domain.js';
 
 const app = express();
@@ -389,11 +390,33 @@ app.get('/api/attachments/:id', requireUser, (req, res) => {
   res.sendFile(path.join(uploadsRoot, a.filename));
 });
 
-// ---------- AI 建议（本地启发式） ----------
-function heuristic(entry: Record<string, unknown>): { primaryVoid: string; tags: string[]; color: string; emotionLabel?: string; reason: string } {
+// ---------- AI 受控接入（方案书 3.3：AI 只提建议，用户逐项确认；每次调用可回溯） ----------
+
+const VOID_IDS = ['void', 'silence', 'fracture', 'flow', 'mirror', 'nexus', 'limit'];
+const VOID_BRIEF: Record<string, string> = {
+  void: '虚空：未知的世界（模糊感受、陌生领域）',
+  silence: '寂空：已理解的世界（已掌握、已放下）',
+  fracture: '裂空：冲突的世界（矛盾、认知失调）',
+  flow: '流空：变化的世界（进行中、未定型）',
+  mirror: '映空：自我的世界（反思、元认知）',
+  nexus: '联空：连接的世界（类比、跨域联系）',
+  limit: '极空：极限的世界（超越体验、不可言说）',
+};
+const COLOR_NAMES = ['胭脂', '朱砂', '绯红', '桃红', '银红', '枣红', '石榴红', '海棠红', '藤黄', '鹅黄', '缃色', '秋香', '杏黄', '蜜合', '竹青', '松花', '豆绿', '葱绿', '苍绿', '石绿', '铜绿', '碧色', '黛蓝', '靛青', '月白', '天青', '宝蓝', '藏青', '鸦青', '青白', '黛紫', '青莲', '藕荷', '丁香', '紫檀', '玉色', '缁色', '墨灰', '茶色', '赭石'];
+const RELATION_TYPES = new Set(['causal', 'similar', 'conflict', 'inspiration', 'transform', 'contrast', 'contains', 'prerequisite']);
+const EMOTION_LABELS = ['愉悦', '兴奋', '期待', '安心', '感激', '好奇', '专注', '满足', '自豪', '温暖', '爱意', '平静', '焦虑', '愤怒', '悲伤', '恐惧', '孤独', '失落', '羞耻', '内疚', '烦躁', '委屈', '矛盾', '迷茫', '空虚', '疲惫', '淡然', '疏离', '惊讶', '疑惑'];
+
+function recordAiRun(ownerId: string, kind: string, provider: string, model: string, temperature: number, inputSummary: string, output: unknown): void {
+  db.prepare('INSERT INTO ai_runs (id,owner_id,kind,provider,model,temperature,input_summary,output,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id(), ownerId, kind, provider, model, temperature, inputSummary, JSON.stringify(output), now());
+}
+
+/** 本地启发式编码建议（离线降级） */
+function heuristic(entry: Record<string, unknown>) {
   const text = String((entry.title || '') + ' ' + (entry.content || '')).toLowerCase();
   const tags: string[] = [];
-  if (/学习|知识|概念|课程|阅读/.test(text)) tags.push('学习');
+  const keywords: string[] = [];
+  if (/学习|知识|概念|课程|阅读/.test(text)) { tags.push('学习'); keywords.push('学习'); }
   if (/难过|焦虑|愤怒|开心|害怕/.test(text)) tags.push('情绪观察');
   const primaryVoid = /矛盾|冲突|撕裂/.test(text) ? 'fracture' : /反思|我发现|自己/.test(text) ? 'mirror' : /联系|关联|像/.test(text) ? 'nexus' : /正在|过程|学习/.test(text) ? 'flow' : String(entry.primaryVoid || 'void');
   const color = primaryVoid === 'fracture' ? '胭脂' : primaryVoid === 'flow' ? '竹青' : primaryVoid === 'mirror' ? '月白' : '黛蓝';
@@ -403,9 +426,22 @@ function heuristic(entry: Record<string, unknown>): { primaryVoid: string; tags:
   else if (/愤怒|生气|火大/.test(text)) emotionLabel = '愤怒';
   else if (/开心|高兴|兴奋|愉快/.test(text)) emotionLabel = '愉悦';
   else if (/平静|放松|安心/.test(text)) emotionLabel = '平静';
-  return { primaryVoid, tags, color, emotionLabel, reason: '基于文本关键词的本地建议；请由你确认或修改。' };
+  return { primaryVoid, secondaryVoids: [], tags, color, emotionLabel, emotionValence: emotionLabel === '焦虑' || emotionLabel === '悲伤' || emotionLabel === '愤怒' ? -0.5 : emotionLabel ? 0.5 : 0, emotionIntensity: 0.5, keywords, reason: '基于文本关键词的本地建议；请由你确认或修改。' };
 }
-app.post('/api/ai/suggest/:entryId', requireUser, (req, res) => {
+
+function validateEncodePayload(out: Record<string, unknown>, entry: Record<string, unknown>): Record<string, unknown> {
+  const primaryVoid = VOID_IDS.includes(String(out.primaryVoid)) ? String(out.primaryVoid) : String(entry.primaryVoid || 'void');
+  const secondaryVoids = Array.isArray(out.secondaryVoids) ? out.secondaryVoids.filter(v => VOID_IDS.includes(String(v)) && v !== primaryVoid).slice(0, 6).map(String) : [];
+  const color = typeof out.color === 'string' && COLOR_NAMES.includes(out.color) ? out.color : undefined;
+  const emotionLabel = typeof out.emotionLabel === 'string' && EMOTION_LABELS.includes(out.emotionLabel) ? out.emotionLabel : undefined;
+  const valence = Math.max(-1, Math.min(1, Number(out.emotionValence ?? 0)));
+  const intensity = Math.max(0, Math.min(1, Number(out.emotionIntensity ?? 0.5)));
+  const tags = Array.isArray(out.tags) ? out.tags.map(String).slice(0, 8) : [];
+  const keywords = Array.isArray(out.keywords) ? out.keywords.map(String).slice(0, 8) : [];
+  return { primaryVoid, secondaryVoids, tags, color, emotionLabel, emotionValence: valence, emotionIntensity: intensity, keywords, reason: typeof out.reason === 'string' ? out.reason.slice(0, 200) : 'AI 建议；请由你确认或修改。' };
+}
+
+app.post('/api/ai/suggest/:entryId', requireUser, async (req, res) => {
   const e = db.prepare('SELECT * FROM entries WHERE id=? AND owner_id=?').get(req.params.entryId, req.user!.sub) as EntryRow | undefined;
   if (!e) { res.status(404).json({ error: '未找到条目' }); return; }
   const entry = rowToEntry(e) as Record<string, unknown>;
@@ -413,12 +449,203 @@ app.post('/api/ai/suggest/:entryId', requireUser, (req, res) => {
     res.status(403).json({ error: '该条目未授权 AI 分析' });
     return;
   }
-  const payload = heuristic(entry);
+  const config = getAiConfig();
+  let payload: Record<string, unknown>;
+  let provider: string;
+  let model: string;
+  const temperature = 0.4;
+  if (config) {
+    try {
+      const out = (await chatJson(config, [
+        {
+          role: 'system',
+          content: `你是心智宇宙的编码助手。用户用"七空"框架为经历编码。只输出 JSON，不要输出其他内容。\n七空定义：${VOID_IDS.map(v => `${v}（${VOID_BRIEF[v]}）`).join('；')}\n中式色卡可选：${COLOR_NAMES.join('、')}\n情绪词汇表：${EMOTION_LABELS.join('、')}\n输出格式：{"primaryVoid":"七空id","secondaryVoids":[],"color":"色卡色名或null","emotionLabel":"情绪词或null","emotionValence":-1到1,"emotionIntensity":0到1,"tags":[],"keywords":[],"reason":"一句话理由"}`,
+        },
+        {
+          role: 'user',
+          content: `标题：${String(entry.title || '')}\n正文：${String(entry.content || '').slice(0, 2000)}\n当前主空：${String(entry.primaryVoid || '')}`,
+        },
+      ], temperature)) as Record<string, unknown>;
+      payload = validateEncodePayload(out, entry);
+      provider = config.baseUrl;
+      model = config.model;
+    } catch (err) {
+      console.error('[ai] 编码建议调用失败，降级本地启发式：', err);
+      payload = heuristic(entry);
+      provider = 'local-heuristic';
+      model = 'keyword';
+    }
+  } else {
+    payload = heuristic(entry);
+    provider = 'local-heuristic';
+    model = 'keyword';
+  }
+  recordAiRun(req.user!.sub, 'encode', provider, model, temperature, `entry:${String(entry.id)}`, payload);
   const entryId = String(entry.id);
-  const suggestion = { id: id(), owner: req.user!.sub, entryId, payload, status: 'pending', t: now() };
-  db.prepare('INSERT INTO ai_suggestions VALUES (?,?,?,?,?,?)').run(suggestion.id, suggestion.owner, suggestion.entryId, JSON.stringify(payload), suggestion.status, suggestion.t);
-  audit(req.user!.sub, 'ai.suggest', { entryId, provider: 'local-heuristic' });
-  res.json({ ...suggestion, createdAt: suggestion.t });
+  const suggestion = { id: id(), owner: req.user!.sub, entryId, payload, status: 'pending', kind: 'encode', t: now() };
+  db.prepare('INSERT INTO ai_suggestions (id,owner_id,entry_id,payload,status,kind,created_at) VALUES (?,?,?,?,?,?,?)').run(suggestion.id, suggestion.owner, suggestion.entryId, JSON.stringify(payload), suggestion.status, suggestion.kind, suggestion.t);
+  audit(req.user!.sub, 'ai.suggest', { entryId, provider });
+  res.json({ ...suggestion, createdAt: suggestion.t, provider });
+});
+
+app.post('/api/ai/suggestions/:id/status', requireUser, (req, res) => {
+  const status = String((req.body ?? {}).status);
+  if (status !== 'accepted' && status !== 'rejected') {
+    res.status(400).json({ error: '状态只能是 accepted 或 rejected' });
+    return;
+  }
+  const r = db.prepare('UPDATE ai_suggestions SET status=? WHERE id=? AND owner_id=?').run(status, req.params.id, req.user!.sub);
+  if (!r.changes) { res.status(404).json({ error: '建议不存在' }); return; }
+  audit(req.user!.sub, 'ai.suggestion.' + status, { suggestionId: req.params.id });
+  res.status(204).end();
+});
+
+/** 本地启发式关系发现（离线降级）：标签/情绪重叠 → 相似关系 */
+function heuristicDiscover(entries: Record<string, unknown>[]) {
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < entries.length && out.length < 10; i++) {
+    for (let j = i + 1; j < entries.length && out.length < 10; j++) {
+      const a = entries[i];
+      const b = entries[j];
+      const tagsA = (a.tags as string[]) || [];
+      const tagsB = (b.tags as string[]) || [];
+      const shared = tagsA.filter(t => tagsB.includes(t));
+      let strength = 0;
+      let reason = '';
+      if (shared.length > 0) {
+        strength = Math.min(0.8, 0.4 + shared.length * 0.1);
+        reason = `本地启发式：共同标签 ${shared.join('、')}`;
+      } else if ((a.emotion as { label?: string })?.label && (a.emotion as { label?: string }).label === (b.emotion as { label?: string })?.label) {
+        strength = 0.35;
+        reason = `本地启发式：相同情绪 ${(a.emotion as { label: string }).label}`;
+      }
+      if (strength > 0) out.push({ sourceId: a.id, targetId: b.id, relationType: 'similar', strength, reason });
+    }
+  }
+  return out;
+}
+
+app.post('/api/ai/discover', requireUser, async (req, res) => {
+  const rows = db.prepare('SELECT * FROM entries WHERE owner_id=? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 80').all(req.user!.sub) as EntryRow[];
+  const allowed = rows.map(rowToEntry).filter(e => (e.privacy as { aiVisible?: boolean })?.aiVisible) as Record<string, unknown>[];
+  if (allowed.length < 2) {
+    res.json({ id: null, links: [], provider: 'none', reason: '至少需要 2 条开启"允许 AI 分析"的条目', createdAt: now() });
+    return;
+  }
+  const config = getAiConfig();
+  let links: Record<string, unknown>[];
+  let provider: string;
+  let model: string;
+  const temperature = 0.5;
+  if (config) {
+    try {
+      const summaries = allowed.map(e => ({ id: String(e.id), title: String(e.title || ''), void: String(e.primaryVoid || ''), tags: (e.tags as string[]) || [], emotion: (e.emotion as { label?: string })?.label || '', snippet: String(e.content || '').slice(0, 120) }));
+      const out = (await chatJson(config, [
+        {
+          role: 'system',
+          content: `你是关系发现助手。给出一组经历摘要，发现它们之间隐藏的联系。只输出 JSON。\n输出格式：{"links":[{"source":"条目id","target":"条目id","relationType":"causal|similar|conflict|inspiration|transform|contrast|contains|prerequisite","strength":0到1,"reason":"一句话理由"}]}\n最多 10 条；只使用提供的条目 id；source 与 target 不能相同。`,
+        },
+        { role: 'user', content: JSON.stringify(summaries) },
+      ], temperature)) as { links?: unknown[] };
+      const raw = Array.isArray(out.links) ? out.links : [];
+      const idSet = new Set(allowed.map(e => String(e.id)));
+      links = raw
+        .map(x => x as Record<string, unknown>)
+        .filter(x => idSet.has(String(x.source)) && idSet.has(String(x.target)) && x.source !== x.target && RELATION_TYPES.has(String(x.relationType)))
+        .slice(0, 10)
+        .map(x => ({ sourceId: String(x.source), targetId: String(x.target), relationType: String(x.relationType), strength: Math.max(0, Math.min(1, Number(x.strength ?? 0.5))), reason: String(x.reason || '').slice(0, 200) }));
+      provider = config.baseUrl;
+      model = config.model;
+    } catch (err) {
+      console.error('[ai] 关系发现调用失败，降级本地启发式：', err);
+      links = heuristicDiscover(allowed);
+      provider = 'local-heuristic';
+      model = 'overlap';
+    }
+  } else {
+    links = heuristicDiscover(allowed);
+    provider = 'local-heuristic';
+    model = 'overlap';
+  }
+  recordAiRun(req.user!.sub, 'discover', provider, model, temperature, `entries:${allowed.length}`, { links });
+  const suggestion = { id: id(), owner: req.user!.sub, entryId: '', payload: { links }, status: 'pending', kind: 'discover', t: now() };
+  db.prepare('INSERT INTO ai_suggestions (id,owner_id,entry_id,payload,status,kind,created_at) VALUES (?,?,?,?,?,?,?)').run(suggestion.id, suggestion.owner, suggestion.entryId, JSON.stringify(suggestion.payload), suggestion.status, suggestion.kind, suggestion.t);
+  audit(req.user!.sub, 'ai.discover', { provider, candidates: links.length });
+  res.json({ ...suggestion, createdAt: suggestion.t, provider });
+});
+
+app.get('/api/ai/discoveries', requireUser, (req, res) => {
+  const rows = db.prepare("SELECT * FROM ai_suggestions WHERE owner_id=? AND kind='discover' AND status='pending' ORDER BY created_at DESC LIMIT 20").all(req.user!.sub) as { id: string; payload: string; status: string; created_at: number }[];
+  res.json(rows.map(r => ({ id: r.id, payload: parse<Record<string, unknown>>(r.payload, {}), status: r.status, createdAt: r.created_at })));
+});
+
+/** 本地规则学习计划（离线降级） */
+function heuristicPlan(materials: Record<string, unknown>[]) {
+  const chunks = materials.map(m => ({
+    title: `学习「${String(m.title || '')}」`,
+    description: '阅读并用自己的话复述要点；会了的记入寂空，卡住的记入裂空。',
+    days: 1,
+  }));
+  return {
+    chunks,
+    reviewAdvice: '按 1/3/7 天间隔复习；每次先回忆再看笔记。',
+    cognitiveLoadNote: '每次只学一个分块，复述通过再进入下一个，避免同时啃多个新概念。',
+  };
+}
+
+app.post('/api/ai/learn', requireUser, async (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const goal = String(b.goal || '').trim();
+  if (!goal) { res.status(400).json({ error: '请填写学习目标' }); return; }
+  const materialIds = Array.isArray(b.materialIds) ? b.materialIds.map(String) : [];
+  const materials = materialIds
+    .map(mid => db.prepare('SELECT * FROM knowledge_entries WHERE id=? AND owner_id=?').get(mid, req.user!.sub) as KnowledgeRow | undefined)
+    .filter((x): x is KnowledgeRow => !!x)
+    .map(x => rowToKnowledge(x)) as Record<string, unknown>[];
+  const progress = String(b.progress || '');
+  const config = getAiConfig();
+  let plan: Record<string, unknown>;
+  let provider: string;
+  let model: string;
+  const temperature = 0.5;
+  if (config) {
+    try {
+      const out = (await chatJson(config, [
+        {
+          role: 'system',
+          content: `你是学习规划助手。基于用户目标与学习资料，输出分块学习计划与认知负荷建议。只输出 JSON。\n输出格式：{"chunks":[{"title":"分块标题","description":"学什么、怎么学","days":天数}],"reviewAdvice":"复习建议","cognitiveLoadNote":"认知负荷提示（一句话）"}\n分块不超过 7 个；每天学习量不宜过大。`,
+        },
+        {
+          role: 'user',
+          content: `学习目标：${goal}\n学习资料：${JSON.stringify(materials.map(m => ({ title: m.title, difficulty: m.difficulty ?? 2, domain: m.domain ?? '' })))}\n当前进度：${progress || '刚开始'}`,
+        },
+      ], temperature)) as Record<string, unknown>;
+      const chunks = Array.isArray(out.chunks)
+        ? out.chunks.slice(0, 7).map(c => {
+          const x = c as Record<string, unknown>;
+          return { title: String(x.title || '学习分块').slice(0, 60), description: String(x.description || '').slice(0, 300), days: Math.max(1, Math.min(14, Number(x.days ?? 1))) };
+        })
+        : [];
+      plan = {
+        chunks,
+        reviewAdvice: String(out.reviewAdvice || '').slice(0, 300),
+        cognitiveLoadNote: String(out.cognitiveLoadNote || '').slice(0, 200),
+      };
+      provider = config.baseUrl;
+      model = config.model;
+    } catch (err) {
+      console.error('[ai] 学习计划生成失败，降级本地规则：', err);
+      plan = heuristicPlan(materials);
+      provider = 'local-heuristic';
+      model = 'rule';
+    }
+  } else {
+    plan = heuristicPlan(materials);
+    provider = 'local-heuristic';
+    model = 'rule';
+  }
+  recordAiRun(req.user!.sub, 'learn', provider, model, temperature, `goal:${goal};materials:${materials.length}`, plan);
+  res.json({ plan, provider, createdAt: now() });
 });
 
 // ---------- 导出 ----------

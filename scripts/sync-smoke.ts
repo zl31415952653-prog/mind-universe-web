@@ -231,6 +231,37 @@ try {
   assert(timedBack.occurredAt === 1752600000000, '发生时间应往返一致');
   assert(timedBack.insight === true, '灵感标记应往返一致');
 
+  console.log('== 6.10 AI 受控接入：发现/确认/回溯 ==');
+  const da = await api.create({
+    kind: 'daily', title: 'AI发现A', content: 'a', primaryVoid: 'flow', secondaryVoids: [],
+    tags: ['重叠标签'], emotion: {}, encoding: { color: null }, sensory: {},
+    knowledge: {}, privacy: { aiVisible: true }, attachments: [],
+  });
+  const dbEntry = await api.create({
+    kind: 'daily', title: 'AI发现B', content: 'b', primaryVoid: 'flow', secondaryVoids: [],
+    tags: ['重叠标签'], emotion: {}, encoding: { color: null }, sensory: {},
+    knowledge: {}, privacy: { aiVisible: true }, attachments: [],
+  });
+  const disc = await api.discover();
+  assert(disc.payload.links.length >= 1, `应发现至少 1 条候选关系，实际 ${disc.payload.links.length}`);
+  assert(disc.payload.links[0].relationType === 'similar', '启发式发现的候选应为相似关系');
+  const listBefore = await api.discoveries();
+  assert(listBefore.some(x => x.id === disc.id), '发现列表应有待确认项');
+  await api.suggestStatus(disc.id, 'accepted');
+  const listAfter = await api.discoveries();
+  assert(!listAfter.some(x => x.id === disc.id), '接受后建议应从待确认列表移除');
+  // ai_runs 可回溯
+  const { DatabaseSync } = await import('node:sqlite');
+  const auditDb = new DatabaseSync(path.join(tempDir, 'infinity.db'));
+  const runs = auditDb.prepare("SELECT COUNT(*) AS c FROM ai_runs WHERE kind IN ('encode','discover')").get() as { c: number };
+  auditDb.close();
+  assert(runs.c >= 2, `ai_runs 应有回溯记录，实际 ${runs.c}`);
+  // 学习计划（本地规则降级）
+  const anyK = (await db.knowledge.toArray()).find(k => !k.isDefault);
+  assert(!!anyK, '应有可用的知识条目');
+  const learn = await api.learn('测试目标：掌握七空', [anyK!.id, da.id, dbEntry.id].filter(Boolean), '0/3 分块已完成');
+  assert(learn.plan.chunks.length >= 1 && learn.plan.cognitiveLoadNote.length > 0, '学习计划应包含分块与认知负荷提示');
+
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
   const entryCount = (await db.entries.toArray()).length;
   const knowledgeCount = (await db.knowledge.toArray()).length;

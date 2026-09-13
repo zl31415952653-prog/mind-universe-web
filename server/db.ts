@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), entry_id TEXT NOT NULL,
   payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_runs (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL,
+  provider TEXT NOT NULL, model TEXT NOT NULL, temperature REAL NOT NULL,
+  input_summary TEXT NOT NULL, output TEXT NOT NULL, created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, action TEXT NOT NULL, metadata TEXT DEFAULT '{}', created_at INTEGER NOT NULL
 );
@@ -72,5 +77,6 @@ ensureColumn('entries', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn('entries', 'sensory', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('entries', 'occurred_at', 'INTEGER');
 ensureColumn('entries', 'insight', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('ai_suggestions', 'kind', "TEXT NOT NULL DEFAULT 'encode'");
 
 export default db;

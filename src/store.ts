@@ -65,7 +65,7 @@ export async function resolveConflict(id: string, keep: 'local' | 'server'): Pro
 
 // ---------- 关系（本地优先，入同步队列） ----------
 
-export async function addLink(input: { sourceId: string; targetId: string; relationType: RelationType; description?: string; strength?: number }): Promise<Link> {
+export async function addLink(input: { sourceId: string; targetId: string; relationType: RelationType; description?: string; strength?: number; source?: 'user' | 'ai' }): Promise<Link> {
   const link: Link = {
     id: crypto.randomUUID(),
     sourceId: input.sourceId,
@@ -73,7 +73,7 @@ export async function addLink(input: { sourceId: string; targetId: string; relat
     relationType: input.relationType,
     description: input.description ?? '',
     strength: input.strength ?? 0.5,
-    source: 'user',
+    source: input.source ?? 'user',
     status: 'accepted',
     createdAt: Date.now(),
   };

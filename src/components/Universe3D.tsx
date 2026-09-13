@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { useNavigate } from 'react-router-dom';
 import { VOIDS, voidById } from '../data';
 import { relationById } from '../relations';
-import type { Entry, Link as LinkItem, VoidDef, VoidId } from '../types';
+import type { CandidateLink, Entry, Link as LinkItem, VoidDef, VoidId } from '../types';
 
 /**
  * 3D 宇宙（第 6 轮）：宇宙 = 认知数据的实时面貌。
@@ -353,6 +353,27 @@ function Wormholes({ links, entries, nodePositions }: { links: LinkItem[]; entri
   );
 }
 
+/** AI 候选边（金色虚线，确认前不进入正式关系） */
+function AILinkLines({ links, nodePositions }: { links: CandidateLink[]; nodePositions: Map<string, THREE.Vector3> }) {
+  const geometry = useMemo(() => {
+    const pos: number[] = [];
+    for (const l of links) {
+      const a = nodePositions.get(l.sourceId);
+      const b = nodePositions.get(l.targetId);
+      if (!a || !b) continue;
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    return g;
+  }, [links, nodePositions]);
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color="#f3c969" transparent opacity={0.95} />
+    </lineSegments>
+  );
+}
+
 function WormholeRing({ mid }: { mid: THREE.Vector3 }) {
   const ref = useRef<THREE.Mesh>(null);
   useFrame((_, dt) => {
@@ -453,9 +474,10 @@ function SpawnDot({ pos, born }: { pos: THREE.Vector3; born: number }) {
 
 // ---------- 主组件 ----------
 
-export default function Universe3D({ entries, links, immersive = false }: {
+export default function Universe3D({ entries, links, aiLinks = [], immersive = false }: {
   entries: Entry[];
   links: LinkItem[];
+  aiLinks?: CandidateLink[];
   immersive?: boolean;
 }) {
   const nav = useNavigate();
@@ -520,6 +542,7 @@ export default function Universe3D({ entries, links, immersive = false }: {
           onClick={e => nav('/experience/' + e.id)}
         />
         <LinkLines links={links} nodePositions={nodePositions} />
+        <AILinkLines links={aiLinks} nodePositions={nodePositions} />
         <Wormholes links={links} entries={mine} nodePositions={nodePositions} />
         <Supernovas entries={mine} nodePositions={nodePositions} onClick={e => nav('/experience/' + e.id)} />
         <SpawnGlow entries={mine} nodePositions={nodePositions} />

@@ -47,15 +47,15 @@ export default function App() {
   return (
     <Shell user={user} onLogout={logout} online={data.online} pendingCount={data.pendingCount}>
       <Routes>
-        <Route path="/" element={<DashboardPage entries={data.entries} links={data.links} />} />
-        <Route path="/universe" element={<DashboardPage entries={data.entries} links={data.links} />} />
+        <Route path="/" element={<DashboardPage entries={data.entries} links={data.links} discoveries={data.discoveries} />} />
+        <Route path="/universe" element={<DashboardPage entries={data.entries} links={data.links} discoveries={data.discoveries} />} />
         <Route path="/experiences" element={<ExperienceListPage entries={data.entries} />} />
         <Route path="/knowledge" element={<KnowledgeListPage knowledge={data.knowledge} refresh={data.refresh} />} />
         <Route path="/knowledge/:id" element={<KnowledgeEditorPage refresh={data.refresh} knowledge={data.knowledge} entries={data.entries} />} />
         <Route path="/experience/:id" element={<EditorPage refresh={data.refresh} entries={data.entries} links={data.links} />} />
-        <Route path="/graph" element={<GraphPage entries={data.entries} links={data.links} />} />
+        <Route path="/graph" element={<GraphPage entries={data.entries} links={data.links} discoveries={data.discoveries} refresh={data.refresh} refreshDiscoveries={data.refreshDiscoveries} />} />
         <Route path="/timeline" element={<TimelinePage entries={data.entries} />} />
-        <Route path="/learn" element={<LearnPage entries={data.entries} />} />
+        <Route path="/learn" element={<LearnPage knowledge={data.knowledge} />} />
         <Route path="/settings" element={<SettingsPage user={user} />} />
       </Routes>
     </Shell>

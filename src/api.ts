@@ -1,4 +1,4 @@
-import type { AttachmentMeta, Entry, EntryDraft, EntryVersion, KnowledgeDraft, KnowledgeEntry, Link, LinkInput, Suggestion, User } from './types';
+import type { AttachmentMeta, Discovery, Entry, EntryDraft, EntryVersion, KnowledgeDraft, KnowledgeEntry, LearnPlan, Link, LinkInput, Suggestion, User } from './types';
 
 const key = 'infinity-token';
 export const getToken = () => localStorage.getItem(key);
@@ -74,6 +74,12 @@ export const api = {
   createLink: (l: LinkInput) => call<Link>('/links', { method: 'POST', body: JSON.stringify(l) }),
   removeLink: (id: string) => call<null>('/links/' + id, { method: 'DELETE' }),
   suggest: (id: string) => call<Suggestion>('/ai/suggest/' + id, { method: 'POST', body: '{}' }),
+  suggestStatus: (id: string, status: 'accepted' | 'rejected') =>
+    call<null>('/ai/suggestions/' + id + '/status', { method: 'POST', body: JSON.stringify({ status }) }),
+  discover: () => call<Discovery>('/ai/discover', { method: 'POST', body: '{}' }),
+  discoveries: () => call<Discovery[]>('/ai/discoveries'),
+  learn: (goal: string, materialIds: string[], progress: string) =>
+    call<{ plan: LearnPlan; provider: string; createdAt: number }>('/ai/learn', { method: 'POST', body: JSON.stringify({ goal, materialIds, progress }) }),
   export: () => call<ExportData>('/export'),
   knowledge: (params: Record<string, string> = {}) =>
     call<KnowledgeEntry[]>('/knowledge?' + new URLSearchParams(params)),

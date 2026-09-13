@@ -37,6 +37,7 @@ const entryToDraft = (e: Entry): EntryDraft => ({
   privacy: e.privacy ?? {},
   attachments: e.attachments ?? [],
   occurredAt: e.occurredAt ?? null,
+  insight: !!e.insight,
 });
 
 /** 仅当从未成功同步且本地为空时，用打包的默认知识包兜底（离线可用） */

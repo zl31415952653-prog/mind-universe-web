@@ -30,6 +30,7 @@ const emptyDraft = (): EntryDraft => ({
   privacy: { aiVisible: false },
   attachments: [],
   occurredAt: null,
+  insight: false,
 });
 
 const toDraft = (e: Entry): EntryDraft => ({
@@ -46,6 +47,7 @@ const toDraft = (e: Entry): EntryDraft => ({
   privacy: e.privacy ?? {},
   attachments: e.attachments ?? [],
   occurredAt: e.occurredAt ?? null,
+  insight: !!e.insight,
 });
 
 const fmt = (t: number) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(t);
@@ -340,6 +342,10 @@ export default function EditorPage({ refresh, entries, links }: { refresh: () =>
           <label className="ai-toggle">
             <input type="checkbox" checked={!!draft.privacy.aiVisible} onChange={e => update('privacy', { ...draft.privacy, aiVisible: e.target.checked })} />
             允许 AI 分析此条目
+          </label>
+          <label className="ai-toggle">
+            <input type="checkbox" checked={!!draft.insight} onChange={e => update('insight', e.target.checked)} />
+            标记为灵感（超新星 💥）
           </label>
           <small>AI 只会提出建议；保存分类或关系始终由你决定。</small>
           {suggestion && (

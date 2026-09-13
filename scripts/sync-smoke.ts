@@ -225,9 +225,11 @@ try {
     kind: 'daily', title: '带发生时间的条目', content: 'x', primaryVoid: 'flow',
     secondaryVoids: [], tags: [], emotion: {}, encoding: { color: null }, sensory: {},
     knowledge: {}, privacy: { aiVisible: false }, attachments: [], occurredAt: 1752600000000,
+    insight: true,
   });
   const timedBack = await api.entry(timed.id);
   assert(timedBack.occurredAt === 1752600000000, '发生时间应往返一致');
+  assert(timedBack.insight === true, '灵感标记应往返一致');
 
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
   const entryCount = (await db.entries.toArray()).length;

@@ -72,6 +72,8 @@ export interface Entry {
   attachments?: AttachmentMeta[];
   /** 发生时间（时间线锚点；日常经历建议填写） */
   occurredAt?: number | null;
+  /** 灵感标记（超新星：3D 宇宙中的闪耀星） */
+  insight?: boolean;
   source?: string | null;
   isDefault?: boolean;
   createdAt: number;
@@ -152,6 +154,7 @@ export interface EntryDraft {
   privacy: Privacy;
   attachments?: AttachmentMeta[];
   occurredAt?: number | null;
+  insight?: boolean;
 }
 
 export interface Link {

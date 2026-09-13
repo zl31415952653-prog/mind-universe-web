@@ -1,7 +1,7 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import EntryCard from '../components/EntryCard';
-import Universe from '../components/Universe';
+import Universe3D from '../components/Universe3D';
 import { VOIDS } from '../data';
 import type { Entry, Link as LinkItem } from '../types';
 
@@ -79,17 +79,36 @@ function EmotionHeatmap({ entries }: { entries: Entry[] }) {
 
 export default function DashboardPage({ entries, links }: { entries: Entry[]; links: LinkItem[] }) {
   const mine = entries.filter(e => !e.isDefault);
+  const [immersive, setImmersive] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setImmersive(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <>
+      {immersive && (
+        <div className="immersive">
+          <button className="imm-close" onClick={() => setImmersive(false)}>✕ 退出沉浸（Esc）</button>
+          <Universe3D entries={entries} links={links} immersive />
+        </div>
+      )}
       <header className="page-head">
         <div>
           <p className="eyebrow">你的认知数据面貌</p>
           <h1>心智宇宙</h1>
           <p>每颗星尘都是一段被你确认过的经历。</p>
         </div>
-        <Link className="primary" to="/experience/new">+ 记录经历</Link>
+        <div className="actions">
+          <button className="secondary" onClick={() => setImmersive(true)}>沉浸模式</button>
+          <Link className="primary" to="/experience/new">+ 记录经历</Link>
+        </div>
       </header>
-      <Universe entries={entries} links={links} />
+      <Universe3D entries={entries} links={links} />
       <section className="void-stats">
         {VOIDS.map(v => (
           <div key={v.id} style={{ borderColor: v.color }}>

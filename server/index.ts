@@ -42,6 +42,7 @@ const rowToEntry = (row: SqlRow) => row && ({
   attachments: parse<AttachmentMeta[]>(row.attachments, []),
   sensory: parse<Record<string, unknown>>(row.sensory, {}),
   occurredAt: row.occurred_at ?? null,
+  insight: !!row.insight,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   deletedAt: row.deleted_at,
@@ -197,12 +198,13 @@ app.post('/api/entries', requireUser, (req, res) => {
     attachments: (b.attachments as unknown[]) || [],
     sensory: (b.sensory as Record<string, unknown>) || {},
     occurredAt: (b.occurredAt as number | null | undefined) ?? null,
+    insight: b.insight ? 1 : 0,
     source: (b.source as string | null | undefined) || null,
     t: now(),
   };
   try {
-    db.prepare(`INSERT INTO entries (id,owner_id,kind,title,content,primary_void,secondary_voids,tags,emotion,encoding,knowledge,privacy,attachments,sensory,occurred_at,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(entry.id, entry.ownerId, entry.kind, entry.title, entry.content, entry.primaryVoid, JSON.stringify(entry.secondaryVoids), JSON.stringify(entry.tags), JSON.stringify(entry.emotion), JSON.stringify(entry.encoding), JSON.stringify(entry.knowledge), JSON.stringify(entry.privacy), JSON.stringify(entry.attachments), JSON.stringify(entry.sensory), entry.occurredAt, entry.source, entry.t, entry.t);
+    db.prepare(`INSERT INTO entries (id,owner_id,kind,title,content,primary_void,secondary_voids,tags,emotion,encoding,knowledge,privacy,attachments,sensory,occurred_at,insight,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(entry.id, entry.ownerId, entry.kind, entry.title, entry.content, entry.primaryVoid, JSON.stringify(entry.secondaryVoids), JSON.stringify(entry.tags), JSON.stringify(entry.emotion), JSON.stringify(entry.encoding), JSON.stringify(entry.knowledge), JSON.stringify(entry.privacy), JSON.stringify(entry.attachments), JSON.stringify(entry.sensory), entry.occurredAt, entry.insight, entry.source, entry.t, entry.t);
     audit(entry.ownerId, 'entry.create', { entryId: entry.id });
     res.status(201).json(rowToEntry(db.prepare('SELECT * FROM entries WHERE id=?').get(entry.id) as EntryRow));
   } catch (err) {
@@ -226,11 +228,11 @@ app.put('/api/entries/:id', requireUser, (req, res) => {
     kind: string; title: string; content: string; primaryVoid: string;
     secondaryVoids: unknown; tags: unknown; emotion: unknown; encoding: unknown;
     knowledge: unknown; privacy: unknown; attachments: unknown; sensory: unknown;
-    occurredAt: number | null; source: string | null;
+    occurredAt: number | null; insight: unknown; source: string | null;
   };
   const t = now();
-  db.prepare(`UPDATE entries SET kind=?,title=?,content=?,primary_void=?,secondary_voids=?,tags=?,emotion=?,encoding=?,knowledge=?,privacy=?,attachments=?,sensory=?,occurred_at=?,source=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
-    .run(next.kind, next.title, next.content, next.primaryVoid, JSON.stringify(next.secondaryVoids || []), JSON.stringify(next.tags || []), JSON.stringify(next.emotion || {}), JSON.stringify(next.encoding || {}), JSON.stringify(next.knowledge || {}), JSON.stringify(next.privacy || {}), JSON.stringify(next.attachments || []), JSON.stringify(next.sensory || {}), next.occurredAt ?? null, next.source || null, t, req.params.id, req.user!.sub);
+  db.prepare(`UPDATE entries SET kind=?,title=?,content=?,primary_void=?,secondary_voids=?,tags=?,emotion=?,encoding=?,knowledge=?,privacy=?,attachments=?,sensory=?,occurred_at=?,insight=?,source=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
+    .run(next.kind, next.title, next.content, next.primaryVoid, JSON.stringify(next.secondaryVoids || []), JSON.stringify(next.tags || []), JSON.stringify(next.emotion || {}), JSON.stringify(next.encoding || {}), JSON.stringify(next.knowledge || {}), JSON.stringify(next.privacy || {}), JSON.stringify(next.attachments || []), JSON.stringify(next.sensory || {}), next.occurredAt ?? null, next.insight ? 1 : 0, next.source || null, t, req.params.id, req.user!.sub);
   audit(req.user!.sub, 'entry.update', { entryId: req.params.id });
   res.json(rowToEntry(db.prepare('SELECT * FROM entries WHERE id=?').get(req.params.id) as EntryRow));
 });

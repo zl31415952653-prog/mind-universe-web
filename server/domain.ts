@@ -29,6 +29,7 @@ export interface EntryRow {
   attachments: string;
   sensory: string;
   occurred_at: number | null;
+  insight: number;
   source: string | null;
   is_default: number;
   created_at: number;

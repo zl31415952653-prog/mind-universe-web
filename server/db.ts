@@ -71,5 +71,6 @@ function ensureColumn(table: string, column: string, ddl: string): void {
 ensureColumn('entries', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn('entries', 'sensory', "TEXT NOT NULL DEFAULT '{}'");
 ensureColumn('entries', 'occurred_at', 'INTEGER');
+ensureColumn('entries', 'insight', 'INTEGER NOT NULL DEFAULT 0');
 
 export default db;

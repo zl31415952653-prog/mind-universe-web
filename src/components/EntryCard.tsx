@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { TYPES } from '../data';
+import { stripMarkdown } from '../text';
 import type { Entry } from '../types';
 import VoidBadge from './VoidBadge';
 
@@ -13,7 +14,7 @@ export default function EntryCard({ entry }: { entry: Entry }) {
         <span className="kind">{TYPES[entry.kind]}</span>
       </div>
       <h3>{entry.title}</h3>
-      <p>{entry.content.slice(0, 125) || '尚未写下内容'}</p>
+      <p>{stripMarkdown(entry.content).slice(0, 125) || '尚未写下内容'}</p>
       <footer>
         {entry.tags.map(t => <i key={t}>#{t}</i>)}
         <time>{fmt(entry.updatedAt)}</time>

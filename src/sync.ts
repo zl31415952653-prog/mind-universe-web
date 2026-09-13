@@ -34,6 +34,7 @@ const entryToDraft = (e: Entry): EntryDraft => ({
   encoding: e.encoding ?? { color: null },
   knowledge: e.knowledge ?? {},
   privacy: e.privacy ?? {},
+  attachments: e.attachments ?? [],
 });
 
 /** 仅当从未成功同步且本地为空时，用打包的默认知识库兜底（离线可用） */

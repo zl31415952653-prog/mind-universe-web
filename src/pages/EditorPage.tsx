@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
+import Markdown from '../components/Markdown';
 import VoidBadge from '../components/VoidBadge';
 import { COLORS, TYPES, VOIDS } from '../data';
 import { db } from '../db';
+import { backlinksOf } from '../links';
 import { removeEntry, resolveConflict, saveEntry } from '../store';
-import type { Entry, EntryDraft, ExperienceType, Suggestion, VoidId } from '../types';
+import { TEMPLATES } from '../templates';
+import type { Entry, EntryDraft, EntryVersion, ExperienceType, Suggestion, VoidId } from '../types';
 
 const emptyDraft = (): EntryDraft => ({
   kind: 'daily',
@@ -19,6 +22,7 @@ const emptyDraft = (): EntryDraft => ({
   encoding: { color: null },
   knowledge: { domain: '', taxonomy: [] },
   privacy: { aiVisible: false },
+  attachments: [],
 });
 
 const toDraft = (e: Entry): EntryDraft => ({
@@ -32,11 +36,12 @@ const toDraft = (e: Entry): EntryDraft => ({
   encoding: e.encoding ?? { color: null },
   knowledge: e.knowledge ?? {},
   privacy: e.privacy ?? {},
+  attachments: e.attachments ?? [],
 });
 
 const fmt = (t: number) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(t);
 
-export default function EditorPage({ refresh }: { refresh: () => Promise<void> }) {
+export default function EditorPage({ refresh, entries }: { refresh: () => Promise<void>; entries: Entry[] }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [draft, setDraft] = useState<EntryDraft>(emptyDraft);
@@ -44,6 +49,9 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
   const [loading, setLoading] = useState(id !== 'new');
   const [error, setError] = useState('');
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  const [mode, setMode] = useState<'write' | 'preview'>('write');
+  const [uploading, setUploading] = useState(false);
+  const [versions, setVersions] = useState<EntryVersion[] | null>(null);
 
   useEffect(() => {
     if (id === 'new' || !id) {
@@ -65,6 +73,17 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
   }, [id]);
 
   const update = <K extends keyof EntryDraft>(k: K, v: EntryDraft[K]) => setDraft(d => ({ ...d, [k]: v }));
+
+  const changeKind = (k: ExperienceType) => {
+    setDraft(d => {
+      const next = { ...d, kind: k };
+      // 新建且正文为空时自动套用该类型模板（已有内容则不打扰）
+      if (!next.content.trim()) next.content = TEMPLATES[k];
+      return next;
+    });
+  };
+
+  const insertTemplate = () => update('content', TEMPLATES[draft.kind] + '\n\n' + draft.content);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -113,7 +132,32 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
     }
   };
 
+  const uploadFile = async (file: File) => {
+    setError('');
+    setUploading(true);
+    try {
+      const att = await api.upload(file);
+      update('attachments', [...(draft.attachments ?? []), att]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '上传失败（附件上传需要联网）');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const loadVersions = async () => {
+    if (!id || id === 'new') return;
+    setError('');
+    try {
+      setVersions(await api.versions(id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '获取历史版本失败（需要联网）');
+    }
+  };
+
   if (loading) return <p>正在载入…</p>;
+
+  const backlinks = full ? backlinksOf(entries, full.title) : [];
 
   return (
     <form className="editor" onSubmit={submit}>
@@ -143,18 +187,40 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
       <div className="editor-grid">
         <section className="paper">
           <label>经历类型
-            <select value={draft.kind} onChange={e => update('kind', e.target.value as ExperienceType)}>
+            <select value={draft.kind} onChange={e => changeKind(e.target.value as ExperienceType)}>
               {(Object.entries(TYPES) as [ExperienceType, string][]).map(([k, n]) => <option value={k} key={k}>{n}</option>)}
             </select>
           </label>
           <label>标题
             <input required placeholder="给这段经历一个名字" value={draft.title} onChange={e => update('title', e.target.value)} />
           </label>
-          <label>正文 <small>支持 Markdown；使用 [[标题]] 记录关联</small>
-            <textarea rows={18} placeholder="此刻发生了什么？你感受到什么？" value={draft.content} onChange={e => update('content', e.target.value)} />
+          <label>正文 <small>支持 Markdown；使用 [[标题]] 建立双链</small>
+            <div className="content-tabs">
+              <button type="button" className={mode === 'write' ? 'active' : ''} onClick={() => setMode('write')}>编辑</button>
+              <button type="button" className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')}>预览</button>
+              <button type="button" className="text" title="按当前类型插入模板" onClick={insertTemplate}>插入模板</button>
+            </div>
+            {mode === 'write'
+              ? <textarea rows={18} placeholder="此刻发生了什么？你感受到什么？" value={draft.content} onChange={e => update('content', e.target.value)} />
+              : <div className="preview-box"><Markdown content={draft.content} entries={entries} /></div>}
           </label>
           <label>标签 <small>用逗号分隔</small>
             <input value={draft.tags.join(', ')} onChange={e => update('tags', e.target.value.split(',').map(x => x.trim()).filter(Boolean))} />
+          </label>
+          <label>附件 <small>图片/音频，单个不超过 10MB；上传需要联网，附件引用随保存写入条目</small>
+            <div className="attachments">
+              {(draft.attachments ?? []).map(a => (
+                <span key={a.id} className="attachment-chip">
+                  {a.name} <small>({Math.max(1, Math.round(a.size / 1024))}KB)</small>
+                  <button type="button" title="移除引用" onClick={() => update('attachments', (draft.attachments ?? []).filter(x => x.id !== a.id))}>×</button>
+                </span>
+              ))}
+              <input type="file" accept="image/*,audio/*" disabled={uploading} onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) void uploadFile(f);
+                e.target.value = '';
+              }} />
+            </div>
           </label>
         </section>
         <aside className="coding">
@@ -213,6 +279,33 @@ export default function EditorPage({ refresh }: { refresh: () => Promise<void> }
               <p>{suggestion.payload.reason}</p>
               <p>主空：<VoidBadge id={suggestion.payload.primaryVoid} /></p>
               <p>标签：{suggestion.payload.tags.join('、') || '无'}</p>
+            </div>
+          )}
+          {id !== 'new' && (
+            <div className="panel-block">
+              <h3>反向链接</h3>
+              {backlinks.length === 0
+                ? <small>没有条目链接到这里（在别的条目正文写 [[{full?.title ?? ''}]] 即可建立）</small>
+                : backlinks.map(e => (
+                  <Link key={e.id} className="backlink-item" to={'/experience/' + e.id}>
+                    {e.title}
+                  </Link>
+                ))}
+            </div>
+          )}
+          {id !== 'new' && (
+            <div className="panel-block">
+              <h3>历史版本 <button type="button" className="text" onClick={loadVersions}>{versions ? `${versions.length} 个` : '获取'}</button></h3>
+              {versions?.length === 0 && <small>暂无历史版本（保存并同步后生成）</small>}
+              {versions && versions.length > 0 && <small>点击版本载入编辑器，按"保存"后生效</small>}
+              {versions?.map(v => (
+                <div key={v.id} className="history-item">
+                  <small>{fmt(v.createdAt)} · 第 {v.version} 版</small>
+                  <button type="button" className="text" onClick={() => setDraft(toDraft(v.snapshot))}>
+                    {v.snapshot.title || '（无标题）'}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </aside>

@@ -49,7 +49,7 @@ export default function App() {
         <Route path="/universe" element={<DashboardPage entries={data.entries} links={data.links} />} />
         <Route path="/experiences" element={<ExperienceListPage entries={data.entries} />} />
         <Route path="/knowledge" element={<ExperienceListPage entries={data.entries} knowledge />} />
-        <Route path="/experience/:id" element={<EditorPage refresh={data.refresh} />} />
+        <Route path="/experience/:id" element={<EditorPage refresh={data.refresh} entries={data.entries} />} />
         <Route path="/graph" element={<GraphPage entries={data.entries} links={data.links} />} />
         <Route path="/timeline" element={<TimelinePage entries={data.entries} />} />
         <Route path="/learn" element={<LearnPage entries={data.entries} />} />

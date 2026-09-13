@@ -2,9 +2,13 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = path.resolve('data');
-fs.mkdirSync(root, { recursive: true });
-const db = new DatabaseSync(path.join(root, 'infinity.db'));
+// 数据目录：部署时用 DATA_DIR 指向独立数据盘（如 /opt/infinity/data），默认项目 data/
+export const dataRoot = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve('data');
+fs.mkdirSync(dataRoot, { recursive: true });
+export const uploadsRoot = path.join(dataRoot, 'uploads');
+fs.mkdirSync(uploadsRoot, { recursive: true });
+
+const db = new DatabaseSync(path.join(dataRoot, 'infinity.db'));
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
 
 db.exec(`
@@ -36,6 +40,23 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, action TEXT NOT NULL, metadata TEXT DEFAULT '{}', created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  filename TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+  created_at INTEGER NOT NULL, deleted_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS entry_versions (
+  id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, owner_id TEXT NOT NULL REFERENCES users(id),
+  version INTEGER NOT NULL, snapshot TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_versions_entry ON entry_versions(entry_id, version DESC);
 `);
+
+// 轻量迁移：为旧库补新增列（正式迁移脚本体系在第 8 轮落地）
+function ensureColumn(table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some(c => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+ensureColumn('entries', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
 
 export default db;

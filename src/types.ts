@@ -49,6 +49,7 @@ export interface Entry {
   encoding: EntryEncoding;
   knowledge: KnowledgeEncoding;
   privacy: Privacy;
+  attachments?: AttachmentMeta[];
   source?: string | null;
   isDefault?: boolean;
   createdAt: number;
@@ -60,6 +61,25 @@ export interface Entry {
   conflict?: boolean;
   /** 冲突时的服务器版本（供"采用云端版"恢复） */
   serverCopy?: Entry;
+}
+
+/** 附件元数据（文件本体存服务器 uploads 目录，条目里只存引用） */
+export interface AttachmentMeta {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  url: string;
+  createdAt: number;
+}
+
+/** 历史版本（服务器在每次更新前保存快照） */
+export interface EntryVersion {
+  id: string;
+  entryId: string;
+  version: number;
+  snapshot: Entry;
+  createdAt: number;
 }
 
 /** 编辑器/创建接口使用的草稿：不含服务端生成的字段 */
@@ -74,6 +94,7 @@ export interface EntryDraft {
   encoding: EntryEncoding;
   knowledge: KnowledgeEncoding;
   privacy: Privacy;
+  attachments?: AttachmentMeta[];
 }
 
 export interface Link {

@@ -1,4 +1,4 @@
-import type { Entry, EntryDraft, Link, LinkInput, Suggestion, User } from './types';
+import type { AttachmentMeta, Entry, EntryDraft, EntryVersion, Link, LinkInput, Suggestion, User } from './types';
 
 const key = 'infinity-token';
 export const getToken = () => localStorage.getItem(key);
@@ -22,9 +22,10 @@ export class ApiError extends Error {
 
 async function call<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
+  // FormData 由浏览器自动设置 multipart 边界，不能手动指定 Content-Type
+  if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (getToken()) headers.Authorization = `Bearer ${getToken()}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000); // 8 秒超时，避免离线时无限等待
@@ -54,6 +55,13 @@ export const api = {
   entries: (params: Record<string, string> = {}) =>
     call<Entry[]>('/entries?' + new URLSearchParams(params)),
   entry: (id: string) => call<Entry>('/entries/' + id),
+  versions: (id: string) => call<EntryVersion[]>('/entries/' + id + '/versions'),
+  /** 上传图片/音频附件（需要联网）；返回引用元数据，保存条目时随 attachments 一并提交 */
+  upload: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return call<AttachmentMeta>('/attachments', { method: 'POST', body: form });
+  },
   /** 创建；id 可选（离线创建时由客户端生成，服务端幂等接受） */
   create: (e: EntryDraft & { id?: string }) =>
     call<Entry>('/entries', { method: 'POST', body: JSON.stringify(e) }),

@@ -39,9 +39,11 @@ function assert(cond: boolean, msg: string) {
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infinity-smoke-'));
 const serverLog = fs.createWriteStream(path.join(tempDir, 'server.log'));
-const server = spawn('node', [path.join(process.cwd(), 'server', 'index.js')], {
-  cwd: tempDir, // 让 data/ 落到临时目录，不污染项目真实数据
-  env: { ...process.env, PORT: '8799' },
+// 服务端已是 TypeScript：用 node + tsx CLI 直接运行；DATA_DIR 指向临时目录避免污染真实数据
+const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
+const server = spawn(process.execPath, [tsxCli, path.join(process.cwd(), 'server', 'index.ts')], {
+  cwd: process.cwd(),
+  env: { ...process.env, PORT: '8799', DATA_DIR: tempDir },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 server.stdout.pipe(serverLog);
@@ -132,6 +134,24 @@ try {
   let gone = false;
   try { await api.entry(doomed.id); } catch { gone = true; }
   assert(gone, '服务器端应已删除');
+
+  console.log('== 6.5 附件：上传 + 鉴权下载 ==');
+  const fakePng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const att = await api.upload(new File([fakePng], 'smoke.png', { type: 'image/png' }));
+  assert(!!att.id && att.mime === 'image/png' && att.url.startsWith('/api/attachments/'), '附件应上传成功并返回元数据');
+  const dl = await fetch('http://localhost:8799' + att.url, { headers: { Authorization: `Bearer ${r.token}` } });
+  assert(dl.status === 200, `附件应可鉴权下载，实际 ${dl.status}`);
+  const dlNoAuth = await fetch('http://localhost:8799' + att.url);
+  assert(dlNoAuth.status === 401, '未登录下载附件应被拒绝');
+
+  console.log('== 6.6 历史版本 ==');
+  const h = serverEntries.find(e => e.title === '离线1')!;
+  await api.update(h.id, draftOf(h, { title: '离线1-v2' }), h.version);
+  const h2 = await api.entry(h.id);
+  await api.update(h2.id, draftOf(h2, { title: '离线1-v3' }), h2.version);
+  const vers = await api.versions(h.id);
+  assert(vers.length >= 2, `应至少有 2 个历史版本，实际 ${vers.length}`);
+  assert(vers[0].snapshot.title === '离线1-v2', `最新历史快照应为更新前标题，实际 ${vers[0].snapshot.title}`);
 
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
   const before = (await db.entries.toArray()).length;

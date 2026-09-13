@@ -153,6 +153,27 @@ try {
   assert(vers.length >= 2, `应至少有 2 个历史版本，实际 ${vers.length}`);
   assert(vers[0].snapshot.title === '离线1-v2', `最新历史快照应为更新前标题，实际 ${vers[0].snapshot.title}`);
 
+  console.log('== 6.7 全通道编码：色块 + 感官编码往返 ==');
+  const coded = await api.create({
+    kind: 'emotional',
+    title: '编码往返测试',
+    content: '今天很焦虑，总是担心',
+    primaryVoid: 'fracture',
+    secondaryVoids: [],
+    tags: [],
+    emotion: { valence: -0.6, intensity: 0.8, label: '焦虑' },
+    encoding: { color: { name: '胭脂', hex: '#c04851', meaning: '热烈、情感' } },
+    sensory: { shapes: ['碎片'], textures: ['粗糙'], angles: ['90°'], lines: ['锯齿'] },
+    knowledge: {},
+    privacy: { aiVisible: true },
+    attachments: [],
+  });
+  const codedBack = await api.entry(coded.id);
+  assert(codedBack.encoding?.color?.name === '胭脂', '色块编码应往返一致');
+  assert(codedBack.sensory?.shapes?.includes('碎片') && codedBack.sensory?.lines?.includes('锯齿'), '感官编码应往返一致');
+  const sug = await api.suggest(coded.id);
+  assert(sug.payload.emotionLabel === '焦虑', `情绪建议应为焦虑，实际 ${sug.payload.emotionLabel}`);
+
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
   const before = (await db.entries.toArray()).length;
   // 模拟拉取失败（服务器不存在）——直接验证本地库仍在

@@ -32,6 +32,7 @@ export function buildDefaultEntries(now = Date.now()): Entry[] {
     tags,
     emotion: {},
     encoding: { color: null },
+    sensory: {},
     knowledge: {},
     privacy: { aiVisible: false },
     isDefault: true,

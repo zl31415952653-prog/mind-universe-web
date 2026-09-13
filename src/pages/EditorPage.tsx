@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
+import ColorPicker from '../components/ColorPicker';
 import Markdown from '../components/Markdown';
 import VoidBadge from '../components/VoidBadge';
-import { COLORS, TYPES, VOIDS } from '../data';
+import VoidDetail from '../components/VoidDetail';
+import { TYPES, VOIDS } from '../data';
 import { db } from '../db';
+import { ALL_EMOTIONS, EMOTIONS_NEGATIVE, EMOTIONS_POSITIVE } from '../emotions';
 import { backlinksOf } from '../links';
+import { SENSORY_OPTIONS } from '../sensory';
 import { removeEntry, resolveConflict, saveEntry } from '../store';
 import { TEMPLATES } from '../templates';
-import type { Entry, EntryDraft, EntryVersion, ExperienceType, Suggestion, VoidId } from '../types';
+import type { Entry, EntryDraft, EntryVersion, ExperienceType, SensoryEncoding, Suggestion, VoidId } from '../types';
 
 const emptyDraft = (): EntryDraft => ({
   kind: 'daily',
@@ -20,6 +24,7 @@ const emptyDraft = (): EntryDraft => ({
   tags: [],
   emotion: { valence: 0, intensity: 0.5, label: '' },
   encoding: { color: null },
+  sensory: {},
   knowledge: { domain: '', taxonomy: [] },
   privacy: { aiVisible: false },
   attachments: [],
@@ -34,6 +39,7 @@ const toDraft = (e: Entry): EntryDraft => ({
   tags: e.tags ?? [],
   emotion: e.emotion ?? {},
   encoding: e.encoding ?? { color: null },
+  sensory: e.sensory ?? {},
   knowledge: e.knowledge ?? {},
   privacy: e.privacy ?? {},
   attachments: e.attachments ?? [],
@@ -84,6 +90,12 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
   };
 
   const insertTemplate = () => update('content', TEMPLATES[draft.kind] + '\n\n' + draft.content);
+
+  const toggleSensory = (key: keyof SensoryEncoding, v: string) => {
+    const cur = draft.sensory?.[key] ?? [];
+    const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
+    update('sensory', { ...draft.sensory, [key]: next });
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -230,6 +242,7 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
               {VOIDS.map(v => <option value={v.id} key={v.id}>{v.symbol} {v.name} — {v.meaning}</option>)}
             </select>
           </label>
+          <VoidDetail id={draft.primaryVoid} />
           <label>附加空
             <div className="checklist">
               {VOIDS.filter(v => v.id !== draft.primaryVoid).map(v => (
@@ -248,7 +261,18 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
             </div>
           </label>
           <label>情绪标签
-            <input value={draft.emotion.label ?? ''} onChange={e => update('emotion', { ...draft.emotion, label: e.target.value })} />
+            <input list="emotion-list" value={draft.emotion.label ?? ''} placeholder="输入或从下方选择" onChange={e => update('emotion', { ...draft.emotion, label: e.target.value })} />
+            <datalist id="emotion-list">
+              {ALL_EMOTIONS.map(e => <option key={e} value={e} />)}
+            </datalist>
+            <div className="emotion-chips">
+              {EMOTIONS_POSITIVE.map(e => (
+                <button key={e} type="button" className={'emotion-chip pos' + (draft.emotion.label === e ? ' on' : '')} onClick={() => update('emotion', { ...draft.emotion, label: e })}>{e}</button>
+              ))}
+              {EMOTIONS_NEGATIVE.slice(0, 8).map(e => (
+                <button key={e} type="button" className={'emotion-chip neg' + (draft.emotion.label === e ? ' on' : '')} onClick={() => update('emotion', { ...draft.emotion, label: e })}>{e}</button>
+              ))}
+            </div>
           </label>
           <label>情绪效价 <b>{Number(draft.emotion.valence ?? 0).toFixed(1)}</b>
             <input type="range" min="-1" max="1" step=".1" value={draft.emotion.valence ?? 0} onChange={e => update('emotion', { ...draft.emotion, valence: Number(e.target.value) })} />
@@ -256,17 +280,25 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
           <label>情绪强度 <b>{Number(draft.emotion.intensity ?? 0).toFixed(1)}</b>
             <input type="range" min="0" max="1" step=".1" value={draft.emotion.intensity ?? 0} onChange={e => update('emotion', { ...draft.emotion, intensity: Number(e.target.value) })} />
           </label>
-          <label>色块
-            <select
-              value={draft.encoding.color?.name ?? ''}
-              onChange={e => {
-                const c = COLORS.find(x => x.name === e.target.value);
-                update('encoding', { ...draft.encoding, color: c ?? null });
-              }}
-            >
-              <option value="">不设置</option>
-              {COLORS.map(c => <option key={c.name} value={c.name}>{c.name} · {c.meaning}</option>)}
-            </select>
+          <label>色块（中式色卡）
+            <ColorPicker value={draft.encoding.color} onChange={c => update('encoding', { ...draft.encoding, color: c })} />
+          </label>
+          <label>感官编码 <small>形状/质感/角度/线条，可多选</small>
+            <div className="sensory-groups">
+              {SENSORY_OPTIONS.map(g => (
+                <div key={g.key} className="sensory-group">
+                  <em>{g.label}</em>
+                  <div className="emotion-chips">
+                    {g.values.map(v => {
+                      const on = (draft.sensory?.[g.key] ?? []).includes(v);
+                      return (
+                        <button key={v} type="button" className={'emotion-chip' + (on ? ' on' : '')} onClick={() => toggleSensory(g.key, v)}>{v}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </label>
           <label className="ai-toggle">
             <input type="checkbox" checked={!!draft.privacy.aiVisible} onChange={e => update('privacy', { ...draft.privacy, aiVisible: e.target.checked })} />
@@ -279,6 +311,7 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
               <p>{suggestion.payload.reason}</p>
               <p>主空：<VoidBadge id={suggestion.payload.primaryVoid} /></p>
               <p>标签：{suggestion.payload.tags.join('、') || '无'}</p>
+              {suggestion.payload.emotionLabel && <p>情绪：{suggestion.payload.emotionLabel}</p>}
             </div>
           )}
           {id !== 'new' && (

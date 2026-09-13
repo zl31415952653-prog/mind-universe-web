@@ -32,6 +32,7 @@ const entryToDraft = (e: Entry): EntryDraft => ({
   tags: e.tags ?? [],
   emotion: e.emotion ?? {},
   encoding: e.encoding ?? { color: null },
+  sensory: e.sensory ?? {},
   knowledge: e.knowledge ?? {},
   privacy: e.privacy ?? {},
   attachments: e.attachments ?? [],

@@ -40,6 +40,7 @@ const rowToEntry = (row: SqlRow) => row && ({
   knowledge: parse<Record<string, unknown>>(row.knowledge, {}),
   privacy: parse<Record<string, unknown>>(row.privacy, {}),
   attachments: parse<AttachmentMeta[]>(row.attachments, []),
+  sensory: parse<Record<string, unknown>>(row.sensory, {}),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   deletedAt: row.deleted_at,
@@ -166,12 +167,13 @@ app.post('/api/entries', requireUser, (req, res) => {
     knowledge: (b.knowledge as Record<string, unknown>) || {},
     privacy: { aiVisible: false, ...((b.privacy as Record<string, unknown>) || {}) },
     attachments: (b.attachments as unknown[]) || [],
+    sensory: (b.sensory as Record<string, unknown>) || {},
     source: (b.source as string | null | undefined) || null,
     t: now(),
   };
   try {
-    db.prepare(`INSERT INTO entries (id,owner_id,kind,title,content,primary_void,secondary_voids,tags,emotion,encoding,knowledge,privacy,attachments,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(entry.id, entry.ownerId, entry.kind, entry.title, entry.content, entry.primaryVoid, JSON.stringify(entry.secondaryVoids), JSON.stringify(entry.tags), JSON.stringify(entry.emotion), JSON.stringify(entry.encoding), JSON.stringify(entry.knowledge), JSON.stringify(entry.privacy), JSON.stringify(entry.attachments), entry.source, entry.t, entry.t);
+    db.prepare(`INSERT INTO entries (id,owner_id,kind,title,content,primary_void,secondary_voids,tags,emotion,encoding,knowledge,privacy,attachments,sensory,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(entry.id, entry.ownerId, entry.kind, entry.title, entry.content, entry.primaryVoid, JSON.stringify(entry.secondaryVoids), JSON.stringify(entry.tags), JSON.stringify(entry.emotion), JSON.stringify(entry.encoding), JSON.stringify(entry.knowledge), JSON.stringify(entry.privacy), JSON.stringify(entry.attachments), JSON.stringify(entry.sensory), entry.source, entry.t, entry.t);
     audit(entry.ownerId, 'entry.create', { entryId: entry.id });
     res.status(201).json(rowToEntry(db.prepare('SELECT * FROM entries WHERE id=?').get(entry.id) as EntryRow));
   } catch (err) {
@@ -194,11 +196,11 @@ app.put('/api/entries/:id', requireUser, (req, res) => {
   const next = { ...rowToEntry(old), ...b } as unknown as {
     kind: string; title: string; content: string; primaryVoid: string;
     secondaryVoids: unknown; tags: unknown; emotion: unknown; encoding: unknown;
-    knowledge: unknown; privacy: unknown; attachments: unknown; source: string | null;
+    knowledge: unknown; privacy: unknown; attachments: unknown; sensory: unknown; source: string | null;
   };
   const t = now();
-  db.prepare(`UPDATE entries SET kind=?,title=?,content=?,primary_void=?,secondary_voids=?,tags=?,emotion=?,encoding=?,knowledge=?,privacy=?,attachments=?,source=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
-    .run(next.kind, next.title, next.content, next.primaryVoid, JSON.stringify(next.secondaryVoids || []), JSON.stringify(next.tags || []), JSON.stringify(next.emotion || {}), JSON.stringify(next.encoding || {}), JSON.stringify(next.knowledge || {}), JSON.stringify(next.privacy || {}), JSON.stringify(next.attachments || []), next.source || null, t, req.params.id, req.user!.sub);
+  db.prepare(`UPDATE entries SET kind=?,title=?,content=?,primary_void=?,secondary_voids=?,tags=?,emotion=?,encoding=?,knowledge=?,privacy=?,attachments=?,sensory=?,source=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
+    .run(next.kind, next.title, next.content, next.primaryVoid, JSON.stringify(next.secondaryVoids || []), JSON.stringify(next.tags || []), JSON.stringify(next.emotion || {}), JSON.stringify(next.encoding || {}), JSON.stringify(next.knowledge || {}), JSON.stringify(next.privacy || {}), JSON.stringify(next.attachments || []), JSON.stringify(next.sensory || {}), next.source || null, t, req.params.id, req.user!.sub);
   audit(req.user!.sub, 'entry.update', { entryId: req.params.id });
   res.json(rowToEntry(db.prepare('SELECT * FROM entries WHERE id=?').get(req.params.id) as EntryRow));
 });
@@ -280,14 +282,20 @@ app.get('/api/attachments/:id', requireUser, (req, res) => {
 });
 
 // ---------- AI 建议（本地启发式） ----------
-function heuristic(entry: Record<string, unknown>): { primaryVoid: string; tags: string[]; color: string; reason: string } {
+function heuristic(entry: Record<string, unknown>): { primaryVoid: string; tags: string[]; color: string; emotionLabel?: string; reason: string } {
   const text = String((entry.title || '') + ' ' + (entry.content || '')).toLowerCase();
   const tags: string[] = [];
   if (/学习|知识|概念|课程|阅读/.test(text)) tags.push('学习');
   if (/难过|焦虑|愤怒|开心|害怕/.test(text)) tags.push('情绪观察');
   const primaryVoid = /矛盾|冲突|撕裂/.test(text) ? 'fracture' : /反思|我发现|自己/.test(text) ? 'mirror' : /联系|关联|像/.test(text) ? 'nexus' : /正在|过程|学习/.test(text) ? 'flow' : String(entry.primaryVoid || 'void');
   const color = primaryVoid === 'fracture' ? '胭脂' : primaryVoid === 'flow' ? '竹青' : primaryVoid === 'mirror' ? '月白' : '黛蓝';
-  return { primaryVoid, tags, color, reason: '基于文本关键词的本地建议；请由你确认或修改。' };
+  let emotionLabel: string | undefined;
+  if (/难过|伤心|悲伤|哭/.test(text)) emotionLabel = '悲伤';
+  else if (/焦虑|担心|不安/.test(text)) emotionLabel = '焦虑';
+  else if (/愤怒|生气|火大/.test(text)) emotionLabel = '愤怒';
+  else if (/开心|高兴|兴奋|愉快/.test(text)) emotionLabel = '愉悦';
+  else if (/平静|放松|安心/.test(text)) emotionLabel = '平静';
+  return { primaryVoid, tags, color, emotionLabel, reason: '基于文本关键词的本地建议；请由你确认或修改。' };
 }
 app.post('/api/ai/suggest/:entryId', requireUser, (req, res) => {
   const e = db.prepare('SELECT * FROM entries WHERE id=? AND owner_id=?').get(req.params.entryId, req.user!.sub) as EntryRow | undefined;

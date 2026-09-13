@@ -58,5 +58,6 @@ function ensureColumn(table: string, column: string, ddl: string): void {
   if (!cols.some(c => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
 }
 ensureColumn('entries', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('entries', 'sensory', "TEXT NOT NULL DEFAULT '{}'");
 
 export default db;

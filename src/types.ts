@@ -10,6 +10,11 @@ export interface VoidDef {
   meaning: string;  // 未知的世界
   color: string;    // 纲领第八节色值
   question: string; // 核心问题
+  worldview: string; // 世界观完整描述（纲领 8.2）
+  shape: string;     // 编码特征：形状
+  texture: string;   // 编码特征：质感
+  examples: string[]; // 典型经历（纲领 8.3）
+  guidance: string;  // 认知建设建议
 }
 
 export interface EmotionEncoding {
@@ -22,6 +27,18 @@ export interface ColorBlock {
   name: string;
   hex: string;
   meaning: string;
+  /** 色系（红/橙黄/绿/青蓝/紫/白灰褐） */
+  category: string;
+  /** 关联的空（可选，如"靛青"呼应虚空） */
+  voidId?: VoidId;
+}
+
+/** 感官编码：用户独特的感知通道（SPEC 4.3） */
+export interface SensoryEncoding {
+  shapes?: string[];
+  textures?: string[];
+  angles?: string[];
+  lines?: string[];
 }
 
 export interface EntryEncoding {
@@ -47,6 +64,7 @@ export interface Entry {
   tags: string[];
   emotion: EmotionEncoding;
   encoding: EntryEncoding;
+  sensory: SensoryEncoding;
   knowledge: KnowledgeEncoding;
   privacy: Privacy;
   attachments?: AttachmentMeta[];
@@ -92,6 +110,7 @@ export interface EntryDraft {
   tags: string[];
   emotion: EmotionEncoding;
   encoding: EntryEncoding;
+  sensory: SensoryEncoding;
   knowledge: KnowledgeEncoding;
   privacy: Privacy;
   attachments?: AttachmentMeta[];
@@ -122,6 +141,7 @@ export interface SuggestionPayload {
   primaryVoid: VoidId;
   tags: string[];
   color: string;
+  emotionLabel?: string;
   reason: string;
 }
 

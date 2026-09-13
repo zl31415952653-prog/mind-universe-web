@@ -262,6 +262,31 @@ try {
   const learn = await api.learn('测试目标：掌握七空', [anyK!.id, da.id, dbEntry.id].filter(Boolean), '0/3 分块已完成');
   assert(learn.plan.chunks.length >= 1 && learn.plan.cognitiveLoadNote.length > 0, '学习计划应包含分块与认知负荷提示');
 
+  console.log('== 6.11 生产化：权限隔离/审计/consents ==');
+  // 第二个用户不能读第一个用户的任何资源
+  const bEmail = `smoke-b-${Date.now()}@test.local`;
+  await api.register(bEmail, 'testpass123', 'smokeB');
+  const rb = await api.login(bEmail, 'testpass123');
+  const tokenB = rb.token;
+  setToken(tokenB);
+  let leaked = false;
+  try { await api.entry(coded.id); leaked = true; } catch { /* 应 404 */ }
+  assert(!leaked, '用户 B 不应能读取用户 A 的条目');
+  const bEntries = await api.entries();
+  assert(bEntries.length === 0, `用户 B 的经历列表应为空，实际 ${bEntries.length}`);
+  // 审计（换回 A 的 token）
+  setToken(r.token);
+  const auditList = await api.audit();
+  assert(auditList.length >= 3, `审计日志应有记录，实际 ${auditList.length}`);
+  // consents 创建/撤销
+  const consent = await api.createConsent('李医生 ly@example.com', '心理辅导参考', Date.now() + 86400_000);
+  assert(consent.grantee.includes('李医生'), '授权记录应创建成功');
+  const list1 = await api.consents();
+  assert(list1.some(c => c.id === consent.id && !c.revokedAt), '授权列表应包含未撤销记录');
+  await api.revokeConsent(consent.id);
+  const list2 = await api.consents();
+  assert(list2.some(c => c.id === consent.id && c.revokedAt), '撤销后应保留记录并标记 revokedAt');
+
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
   const entryCount = (await db.entries.toArray()).length;
   const knowledgeCount = (await db.knowledge.toArray()).length;

@@ -101,6 +101,22 @@ function authLimiter(req: express.Request, res: express.Response, next: express.
   next();
 }
 
+// 通用 API 限流（第 8 轮）：同一 IP 每分钟最多 600 次请求（排除认证与健康检查）
+const apiWindows = new Map<string, { start: number; count: number }>();
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health' || req.path.startsWith('/auth')) return next();
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const win = apiWindows.get(ip);
+  const t = now();
+  if (win && t - win.start < 60_000 && win.count >= 600) {
+    res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    return;
+  }
+  if (!win || t - win.start >= 60_000) apiWindows.set(ip, { start: t, count: 0 });
+  apiWindows.get(ip)!.count += 1;
+  next();
+});
+
 /** 新用户预置默认知识包（knowledge_entries 表，可升级：INSERT OR IGNORE 幂等） */
 function seedKnowledgeDefaults(userId: string): void {
   const insert = db.prepare(`INSERT OR IGNORE INTO knowledge_entries (id,owner_id,title,content,domain,void_type,taxonomy,difficulty,tags,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -646,6 +662,35 @@ app.post('/api/ai/learn', requireUser, async (req, res) => {
   }
   recordAiRun(req.user!.sub, 'learn', provider, model, temperature, `goal:${goal};materials:${materials.length}`, plan);
   res.json({ plan, provider, createdAt: now() });
+});
+
+// ---------- 审计与分享授权（第 8 轮：生产化） ----------
+app.get('/api/audit', requireUser, (req, res) => {
+  const rows = db.prepare('SELECT action, metadata, created_at FROM audit_logs WHERE owner_id=? ORDER BY created_at DESC LIMIT 100').all(req.user!.sub) as { action: string; metadata: string; created_at: number }[];
+  res.json(rows.map(r => ({ action: r.action, metadata: parse<Record<string, unknown>>(r.metadata, {}), createdAt: r.created_at })));
+});
+
+app.get('/api/consents', requireUser, (req, res) => {
+  const rows = db.prepare('SELECT * FROM consents WHERE owner_id=? ORDER BY created_at DESC LIMIT 100').all(req.user!.sub) as { id: string; grantee: string; purpose: string; scope: string; expires_at: number; revoked_at: number | null; created_at: number }[];
+  res.json(rows.map(c => ({ id: c.id, grantee: c.grantee, purpose: c.purpose, scope: c.scope, expiresAt: c.expires_at, revokedAt: c.revoked_at, createdAt: c.created_at })));
+});
+app.post('/api/consents', requireUser, (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const grantee = String(b.grantee || '').trim();
+  const purpose = String(b.purpose || '').trim();
+  const expiresAt = Number(b.expiresAt);
+  if (!grantee || !purpose) { res.status(400).json({ error: '对象与目的为必填项' }); return; }
+  if (!expiresAt || expiresAt <= now()) { res.status(400).json({ error: '失效时间必须在未来' }); return; }
+  const c = { id: id(), owner: req.user!.sub, grantee, purpose, scope: 'ai-summary', expiresAt, t: now() };
+  db.prepare('INSERT INTO consents (id,owner_id,grantee,purpose,scope,expires_at,created_at) VALUES (?,?,?,?,?,?,?)').run(c.id, c.owner, c.grantee, c.purpose, c.scope, c.expiresAt, c.t);
+  audit(c.owner, 'consent.create', { consentId: c.id, grantee });
+  res.status(201).json({ id: c.id, grantee, purpose, scope: c.scope, expiresAt, createdAt: c.t });
+});
+app.post('/api/consents/:id/revoke', requireUser, (req, res) => {
+  const r = db.prepare('UPDATE consents SET revoked_at=? WHERE id=? AND owner_id=? AND revoked_at IS NULL').run(now(), req.params.id, req.user!.sub);
+  if (!r.changes) { res.status(404).json({ error: '授权不存在或已撤销' }); return; }
+  audit(req.user!.sub, 'consent.revoke', { consentId: req.params.id });
+  res.status(204).end();
 });
 
 // ---------- 导出 ----------

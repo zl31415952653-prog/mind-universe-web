@@ -1,4 +1,4 @@
-import type { AttachmentMeta, Discovery, Entry, EntryDraft, EntryVersion, KnowledgeDraft, KnowledgeEntry, LearnPlan, Link, LinkInput, Suggestion, User } from './types';
+import type { AttachmentMeta, AuditEntry, Consent, Discovery, Entry, EntryDraft, EntryVersion, KnowledgeDraft, KnowledgeEntry, LearnPlan, Link, LinkInput, Suggestion, User } from './types';
 
 const key = 'infinity-token';
 export const getToken = () => localStorage.getItem(key);
@@ -80,6 +80,11 @@ export const api = {
   discoveries: () => call<Discovery[]>('/ai/discoveries'),
   learn: (goal: string, materialIds: string[], progress: string) =>
     call<{ plan: LearnPlan; provider: string; createdAt: number }>('/ai/learn', { method: 'POST', body: JSON.stringify({ goal, materialIds, progress }) }),
+  audit: () => call<AuditEntry[]>('/audit'),
+  consents: () => call<Consent[]>('/consents'),
+  createConsent: (grantee: string, purpose: string, expiresAt: number) =>
+    call<Consent>('/consents', { method: 'POST', body: JSON.stringify({ grantee, purpose, expiresAt }) }),
+  revokeConsent: (id: string) => call<null>('/consents/' + id + '/revoke', { method: 'POST', body: '{}' }),
   export: () => call<ExportData>('/export'),
   knowledge: (params: Record<string, string> = {}) =>
     call<KnowledgeEntry[]>('/knowledge?' + new URLSearchParams(params)),

@@ -230,6 +230,23 @@ export interface LearnPlan {
   cognitiveLoadNote: string;
 }
 
+/** 分享授权记录（第一版：导出式分享；consents 为 AI 摘要分享预留） */
+export interface Consent {
+  id: string;
+  grantee: string;
+  purpose: string;
+  scope: string;
+  expiresAt: number;
+  revokedAt: number | null;
+  createdAt: number;
+}
+
+export interface AuditEntry {
+  action: string;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+}
+
 export interface User {
   id: string;
   email: string;

@@ -11,7 +11,10 @@
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js",
     "check": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && vite build",
-    "smoke": "tsx scripts/sync-smoke.ts"
+    "smoke": "tsx scripts/sync-smoke.ts",
+    "migrate": "tsx scripts/migrate.ts",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts"
   },
   "dependencies": {
     "@react-three/fiber": "^8.18.0",

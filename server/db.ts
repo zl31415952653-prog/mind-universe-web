@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS knowledge_entries (
   version INTEGER NOT NULL DEFAULT 1, deleted_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_owner_updated ON knowledge_entries(owner_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS consents (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  grantee TEXT NOT NULL, purpose TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'ai-summary',
+  expires_at INTEGER NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL
+);
 `);
 
 // 轻量迁移：为旧库补新增列（正式迁移脚本体系在第 8 轮落地）

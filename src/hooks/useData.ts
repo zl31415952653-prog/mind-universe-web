@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { db } from '../db';
 import { ensureLocalSeed, flushOutbox, onSyncChange, pullSnapshot } from '../sync';
-import type { Entry, Link, User } from '../types';
+import type { Entry, KnowledgeEntry, Link, User } from '../types';
 
 /**
  * 用户数据加载（本地优先）：
@@ -11,14 +11,16 @@ import type { Entry, Link, User } from '../types';
 export function useData(user: User | null) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [links, setLinks] = useState<Link[]>([]);
+  const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   const refresh = useCallback(async () => {
-    const [e, l, p] = await Promise.all([db.entries.toArray(), db.links.toArray(), db.outbox.count()]);
+    const [e, l, k, p] = await Promise.all([db.entries.toArray(), db.links.toArray(), db.knowledge.toArray(), db.outbox.count()]);
     setEntries(e.filter(x => !x.deletedAt));
     setLinks(l);
+    setKnowledge(k.filter(x => !x.deletedAt));
     setPendingCount(p);
   }, []);
 
@@ -58,5 +60,5 @@ export function useData(user: User | null) {
     };
   }, [refresh, syncAll]);
 
-  return { entries, links, loading, refresh, pendingCount, online };
+  return { entries, links, knowledge, loading, refresh, pendingCount, online };
 }

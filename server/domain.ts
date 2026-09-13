@@ -77,3 +77,23 @@ export interface UserRow {
   display_name: string;
   created_at: number;
 }
+
+export interface KnowledgeRow {
+  [key: string]: unknown;
+  id: string;
+  owner_id?: string;
+  title: string;
+  content: string;
+  domain: string;
+  void_type: VoidId;
+  taxonomy: string;
+  difficulty: number;
+  prerequisites: string;
+  related_entries: string;
+  tags: string;
+  is_default: number;
+  created_at: number;
+  updated_at: number;
+  version: number;
+  deleted_at: number | null;
+}

@@ -50,6 +50,17 @@ CREATE TABLE IF NOT EXISTS entry_versions (
   version INTEGER NOT NULL, snapshot TEXT NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_versions_entry ON entry_versions(entry_id, version DESC);
+CREATE TABLE IF NOT EXISTS knowledge_entries (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '',
+  domain TEXT NOT NULL DEFAULT '', void_type TEXT NOT NULL,
+  taxonomy TEXT NOT NULL DEFAULT '[]', difficulty INTEGER NOT NULL DEFAULT 2,
+  prerequisites TEXT NOT NULL DEFAULT '[]', related_entries TEXT NOT NULL DEFAULT '[]',
+  tags TEXT NOT NULL DEFAULT '[]', is_default INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1, deleted_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_owner_updated ON knowledge_entries(owner_id, updated_at DESC);
 `);
 
 // 轻量迁移：为旧库补新增列（正式迁移脚本体系在第 8 轮落地）

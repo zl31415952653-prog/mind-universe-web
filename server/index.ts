@@ -8,7 +8,7 @@ import multer from 'multer';
 import db, { uploadsRoot } from './db.js';
 import { defaultKnowledge } from './defaultKnowledge.js';
 import { requireUser, tokenFor } from './auth.js';
-import type { AttachmentMeta, AttachmentRow, EntryRow, LinkRow, UserRow, VersionRow } from './domain.js';
+import type { AttachmentMeta, AttachmentRow, EntryRow, KnowledgeRow, LinkRow, UserRow, VersionRow } from './domain.js';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -66,6 +66,19 @@ const rowToVersion = (row: SqlRow) => row && ({
   createdAt: row.created_at,
 });
 
+const rowToKnowledge = (row: SqlRow) => row && ({
+  ...row,
+  isDefault: !!row.is_default,
+  voidType: row.void_type,
+  taxonomy: parse<string[]>(row.taxonomy, []),
+  prerequisites: parse<string[]>(row.prerequisites, []),
+  relatedEntries: parse<string[]>(row.related_entries, []),
+  tags: parse<string[]>(row.tags, []),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  deletedAt: row.deleted_at,
+});
+
 function audit(ownerId: string, action: string, metadata: Record<string, unknown> = {}): void {
   db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?, ?, ?)').run(id(), ownerId, action, JSON.stringify(metadata), now());
 }
@@ -85,13 +98,27 @@ function authLimiter(req: express.Request, res: express.Response, next: express.
   next();
 }
 
-function seedDefaults(userId: string): void {
-  const insert = db.prepare(`INSERT OR IGNORE INTO entries (id,owner_id,kind,title,content,primary_void,tags,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`);
+/** 新用户预置默认知识包（knowledge_entries 表，可升级：INSERT OR IGNORE 幂等） */
+function seedKnowledgeDefaults(userId: string): void {
+  const insert = db.prepare(`INSERT OR IGNORE INTO knowledge_entries (id,owner_id,title,content,domain,void_type,taxonomy,difficulty,tags,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
   const t = now();
-  for (const [key, title, kind, voidType, tags, content] of defaultKnowledge) {
-    insert.run(String(key + '-' + userId), userId, kind, title, content, voidType, JSON.stringify(tags), 1, t, t);
+  for (const item of defaultKnowledge) {
+    insert.run(String(item.key + '-' + userId), userId, item.title, item.content, item.domain, item.voidType, JSON.stringify(item.taxonomy), item.difficulty, JSON.stringify(item.tags), 1, t, t);
   }
 }
+
+/** 旧数据迁移：把早期版本存在 entries 表里的默认条目搬进知识库（幂等，启动时执行一次） */
+function migrateOldDefaults(): void {
+  const olds = db.prepare('SELECT * FROM entries WHERE is_default=1').all() as EntryRow[];
+  if (olds.length === 0) return;
+  const insert = db.prepare(`INSERT OR IGNORE INTO knowledge_entries (id,owner_id,title,content,domain,void_type,taxonomy,difficulty,tags,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const del = db.prepare('DELETE FROM entries WHERE id=?');
+  for (const o of olds) {
+    insert.run(o.id, o.owner_id ?? '', o.title, o.content, '知识库', o.primary_void, '[]', 1, JSON.stringify(parse<string[]>(o.tags, [])), 1, o.created_at, o.updated_at);
+    del.run(o.id);
+  }
+}
+migrateOldDefaults();
 
 // ---------- 认证 ----------
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: now() }));
@@ -104,7 +131,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const user = { id: id(), email: email.trim().toLowerCase(), displayName: displayName?.trim() || '探索者' };
     db.prepare('INSERT INTO users VALUES (?,?,?,?,?)').run(user.id, user.email, await bcrypt.hash(password, 12), user.displayName, now());
-    seedDefaults(user.id);
+    seedKnowledgeDefaults(user.id);
     audit(user.id, 'register');
     res.status(201).json({ user, token: tokenFor(user) });
   } catch {
@@ -249,6 +276,81 @@ app.delete('/api/links/:id', requireUser, (req, res) => {
   res.status(204).end();
 });
 
+// ---------- 知识库 ----------
+app.get('/api/knowledge', requireUser, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const domain = String(req.query.domain || '').trim();
+  const voidType = req.query.void;
+  let sql = 'SELECT * FROM knowledge_entries WHERE owner_id=? AND deleted_at IS NULL';
+  const args: string[] = [req.user!.sub];
+  if (domain) { sql += ' AND domain=?'; args.push(domain); }
+  if (voidType) { sql += ' AND void_type=?'; args.push(String(voidType)); }
+  if (q) { sql += ' AND (title LIKE ? OR content LIKE ? OR tags LIKE ? OR taxonomy LIKE ?)'; args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); }
+  sql += ' ORDER BY is_default DESC, updated_at DESC';
+  res.json(db.prepare(sql).all(...args).map(rowToKnowledge));
+});
+app.get('/api/knowledge/:id', requireUser, (req, res) => {
+  const k = db.prepare('SELECT * FROM knowledge_entries WHERE id=? AND owner_id=? AND deleted_at IS NULL').get(req.params.id, req.user!.sub) as KnowledgeRow | undefined;
+  if (!k) { res.status(404).json({ error: '未找到知识条目' }); return; }
+  res.json(rowToKnowledge(k));
+});
+app.post('/api/knowledge', requireUser, (req, res) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  if (!(b.title as string | undefined)?.trim() || !b.voidType) {
+    res.status(400).json({ error: '标题和七空归属为必填项' });
+    return;
+  }
+  const entryId = uuidRe.test(String(b.id || '')) ? String(b.id) : id();
+  const k = {
+    id: entryId,
+    ownerId: req.user!.sub,
+    title: String(b.title).trim(),
+    content: String(b.content || ''),
+    domain: String(b.domain || ''),
+    voidType: String(b.voidType),
+    taxonomy: (b.taxonomy as unknown[]) || [],
+    difficulty: Math.max(1, Math.min(5, Number(b.difficulty ?? 2))),
+    prerequisites: (b.prerequisites as unknown[]) || [],
+    relatedEntries: (b.relatedEntries as unknown[]) || [],
+    tags: (b.tags as unknown[]) || [],
+    t: now(),
+  };
+  try {
+    db.prepare(`INSERT INTO knowledge_entries (id,owner_id,title,content,domain,void_type,taxonomy,difficulty,prerequisites,related_entries,tags,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(k.id, k.ownerId, k.title, k.content, k.domain, k.voidType, JSON.stringify(k.taxonomy), k.difficulty, JSON.stringify(k.prerequisites), JSON.stringify(k.relatedEntries), JSON.stringify(k.tags), 0, k.t, k.t);
+    audit(k.ownerId, 'knowledge.create', { knowledgeId: k.id });
+    res.status(201).json(rowToKnowledge(db.prepare('SELECT * FROM knowledge_entries WHERE id=?').get(k.id) as KnowledgeRow));
+  } catch (err) {
+    const existing = db.prepare('SELECT * FROM knowledge_entries WHERE id=? AND owner_id=?').get(k.id, k.ownerId) as KnowledgeRow | undefined;
+    if (existing) { res.status(200).json(rowToKnowledge(existing)); return; }
+    throw err;
+  }
+});
+app.put('/api/knowledge/:id', requireUser, (req, res) => {
+  const old = db.prepare('SELECT * FROM knowledge_entries WHERE id=? AND owner_id=? AND deleted_at IS NULL').get(req.params.id, req.user!.sub) as KnowledgeRow | undefined;
+  if (!old) { res.status(404).json({ error: '未找到知识条目' }); return; }
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  if (b.version && Number(b.version) !== old.version) {
+    res.status(409).json({ error: '此条目已在另一端变更，请先刷新并合并', current: rowToKnowledge(old) });
+    return;
+  }
+  const next = { ...rowToKnowledge(old), ...b } as unknown as {
+    title: string; content: string; domain: string; voidType: string;
+    taxonomy: unknown; difficulty: number; prerequisites: unknown; relatedEntries: unknown; tags: unknown;
+  };
+  const t = now();
+  db.prepare(`UPDATE knowledge_entries SET title=?,content=?,domain=?,void_type=?,taxonomy=?,difficulty=?,prerequisites=?,related_entries=?,tags=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
+    .run(next.title, next.content, next.domain, next.voidType, JSON.stringify(next.taxonomy || []), Math.max(1, Math.min(5, Number(next.difficulty ?? 2))), JSON.stringify(next.prerequisites || []), JSON.stringify(next.relatedEntries || []), JSON.stringify(next.tags || []), t, req.params.id, req.user!.sub);
+  audit(req.user!.sub, 'knowledge.update', { knowledgeId: req.params.id });
+  res.json(rowToKnowledge(db.prepare('SELECT * FROM knowledge_entries WHERE id=?').get(req.params.id) as KnowledgeRow));
+});
+app.delete('/api/knowledge/:id', requireUser, (req, res) => {
+  const r = db.prepare('UPDATE knowledge_entries SET deleted_at=?,version=version+1 WHERE id=? AND owner_id=? AND deleted_at IS NULL').run(now(), req.params.id, req.user!.sub);
+  if (!r.changes) { res.status(404).json({ error: '未找到知识条目' }); return; }
+  audit(req.user!.sub, 'knowledge.delete', { knowledgeId: req.params.id });
+  res.status(204).end();
+});
+
 // ---------- 附件 ----------
 const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml', 'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/ogg', 'audio/x-m4a']);
 const upload = multer({
@@ -317,8 +419,9 @@ app.post('/api/ai/suggest/:entryId', requireUser, (req, res) => {
 app.get('/api/export', requireUser, (req, res) => {
   const entries = db.prepare('SELECT * FROM entries WHERE owner_id=? AND deleted_at IS NULL').all(req.user!.sub).map(rowToEntry);
   const links = db.prepare('SELECT * FROM links WHERE owner_id=?').all(req.user!.sub).map(rowToLink);
+  const knowledge = db.prepare('SELECT * FROM knowledge_entries WHERE owner_id=? AND deleted_at IS NULL').all(req.user!.sub).map(rowToKnowledge);
   audit(req.user!.sub, 'data.export');
-  res.json({ exportedAt: now(), entries, links });
+  res.json({ exportedAt: now(), entries, links, knowledge });
 });
 
 // ---------- 错误处理 ----------

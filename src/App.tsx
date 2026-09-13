@@ -9,6 +9,8 @@ import DashboardPage from './pages/DashboardPage';
 import EditorPage from './pages/EditorPage';
 import ExperienceListPage from './pages/ExperienceListPage';
 import GraphPage from './pages/GraphPage';
+import KnowledgeEditorPage from './pages/KnowledgeEditorPage';
+import KnowledgeListPage from './pages/KnowledgeListPage';
 import LearnPage from './pages/LearnPage';
 import SettingsPage from './pages/SettingsPage';
 import TimelinePage from './pages/TimelinePage';
@@ -48,7 +50,8 @@ export default function App() {
         <Route path="/" element={<DashboardPage entries={data.entries} links={data.links} />} />
         <Route path="/universe" element={<DashboardPage entries={data.entries} links={data.links} />} />
         <Route path="/experiences" element={<ExperienceListPage entries={data.entries} />} />
-        <Route path="/knowledge" element={<ExperienceListPage entries={data.entries} knowledge />} />
+        <Route path="/knowledge" element={<KnowledgeListPage knowledge={data.knowledge} refresh={data.refresh} />} />
+        <Route path="/knowledge/:id" element={<KnowledgeEditorPage refresh={data.refresh} knowledge={data.knowledge} entries={data.entries} />} />
         <Route path="/experience/:id" element={<EditorPage refresh={data.refresh} entries={data.entries} />} />
         <Route path="/graph" element={<GraphPage entries={data.entries} links={data.links} />} />
         <Route path="/timeline" element={<TimelinePage entries={data.entries} />} />

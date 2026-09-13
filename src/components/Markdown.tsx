@@ -4,7 +4,7 @@ import { visit } from 'unist-util-visit';
 import type { Root, Text } from 'mdast';
 import { Link } from 'react-router-dom';
 import { findEntryByTitle } from '../links';
-import type { Entry } from '../types';
+import type { Entry, KnowledgeEntry } from '../types';
 
 /**
  * Markdown 渲染 + [[双链]] 支持：
@@ -37,7 +37,7 @@ function wikiLinks() {
   };
 }
 
-export default function Markdown({ content, entries }: { content: string; entries: Entry[] }) {
+export default function Markdown({ content, entries, knowledge = [] }: { content: string; entries: Entry[]; knowledge?: KnowledgeEntry[] }) {
   return (
     <div className="prose">
       <ReactMarkdown
@@ -46,10 +46,14 @@ export default function Markdown({ content, entries }: { content: string; entrie
           a: ({ href, children }) => {
             if (href?.startsWith('wiki:')) {
               const title = decodeURIComponent(href.slice(5));
-              const target = findEntryByTitle(entries, title);
-              return target
-                ? <Link className="wiki-link" to={'/experience/' + target.id}>{children}</Link>
-                : <span className="wiki-link missing" title={`尚未创建题为「${title}」的条目`}>{children}</span>;
+              const target = findEntryByTitle(entries, title) ?? knowledge.find(k => !k.deletedAt && k.title.trim() === title);
+              if (target && 'primaryVoid' in target) {
+                return <Link className="wiki-link" to={'/experience/' + target.id}>{children}</Link>;
+              }
+              if (target) {
+                return <Link className="wiki-link" to={'/knowledge/' + target.id}>{children}</Link>;
+              }
+              return <span className="wiki-link missing" title={`尚未创建题为「${title}」的条目`}>{children}</span>;
             }
             return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
           },

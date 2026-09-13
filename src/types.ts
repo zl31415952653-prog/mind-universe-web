@@ -100,6 +100,39 @@ export interface EntryVersion {
   createdAt: number;
 }
 
+/** 知识库条目（v3 3.3 KnowledgeEntry；独立于经历实体） */
+export interface KnowledgeEntry {
+  id: string;
+  title: string;
+  content: string;
+  domain: string;
+  voidType: VoidId;
+  taxonomy: string[];
+  difficulty: number; // 1-5
+  prerequisites: string[];   // 前置知识条目 id
+  relatedEntries: string[];  // 相关知识条目 id
+  tags: string[];
+  isDefault?: boolean;
+  createdAt: number;
+  updatedAt: number;
+  version?: number;
+  deletedAt?: number;
+  conflict?: boolean;
+  serverCopy?: KnowledgeEntry;
+}
+
+export interface KnowledgeDraft {
+  title: string;
+  content: string;
+  domain: string;
+  voidType: VoidId;
+  taxonomy: string[];
+  difficulty: number;
+  prerequisites: string[];
+  relatedEntries: string[];
+  tags: string[];
+}
+
 /** 编辑器/创建接口使用的草稿：不含服务端生成的字段 */
 export interface EntryDraft {
   kind: ExperienceType;

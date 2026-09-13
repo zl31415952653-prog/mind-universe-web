@@ -1,7 +1,7 @@
 import { api, ApiError } from './api';
 import { db, getMeta, setMeta } from './db';
-import { buildDefaultEntries } from './defaultKnowledge';
-import type { Entry, EntryDraft } from './types';
+import { buildDefaultKnowledge } from './defaultKnowledge';
+import type { Entry, EntryDraft, KnowledgeDraft, KnowledgeEntry } from './types';
 
 /**
  * 同步引擎（离线优先）：
@@ -38,24 +38,26 @@ const entryToDraft = (e: Entry): EntryDraft => ({
   attachments: e.attachments ?? [],
 });
 
-/** 仅当从未成功同步且本地为空时，用打包的默认知识库兜底（离线可用） */
+/** 仅当从未成功同步且本地为空时，用打包的默认知识包兜底（离线可用） */
 export async function ensureLocalSeed(): Promise<void> {
   const lastPull = await getMeta<number>('lastPulledAt');
   if (lastPull) return;
-  const count = await db.entries.count();
+  const count = await db.knowledge.count();
   if (count === 0) {
-    await db.entries.bulkPut(buildDefaultEntries());
+    await db.knowledge.bulkPut(buildDefaultKnowledge());
   }
 }
 
 /** 拉取服务器快照并合并：本地未修改的以服务器为准；服务器已删的移除本地副本 */
 export async function pullSnapshot(): Promise<void> {
-  const [serverEntries, serverLinks] = await Promise.all([api.entries(), api.links()]);
+  const [serverEntries, serverLinks, serverKnowledge] = await Promise.all([api.entries(), api.links(), api.knowledge()]);
   const localEntries = await db.entries.toArray();
   const localLinks = await db.links.toArray();
+  const localKnowledge = await db.knowledge.toArray();
   const outbox = await db.outbox.toArray();
   const pendingEntryIds = new Set(outbox.filter(o => o.kind === 'entry').map(o => o.itemId));
   const pendingLinkIds = new Set(outbox.filter(o => o.kind === 'link').map(o => o.itemId));
+  const pendingKnowledgeIds = new Set(outbox.filter(o => o.kind === 'knowledge').map(o => o.itemId));
   const lastPull = Number(await getMeta<number>('lastPulledAt') ?? 0);
 
   for (const se of serverEntries) {
@@ -81,12 +83,24 @@ export async function pullSnapshot(): Promise<void> {
     }
   }
 
+  for (const sk of serverKnowledge) {
+    const lk = localKnowledge.find(k => k.id === sk.id);
+    if (!lk || !pendingKnowledgeIds.has(sk.id)) await db.knowledge.put(sk);
+  }
+  const serverKnowledgeIds = new Set(serverKnowledge.map(k => k.id));
+  for (const lk of localKnowledge) {
+    if (lk.deletedAt) continue;
+    if (!serverKnowledgeIds.has(lk.id) && !pendingKnowledgeIds.has(lk.id) && lk.updatedAt <= lastPull) {
+      await db.knowledge.delete(lk.id);
+    }
+  }
+
   await setMeta('lastPulledAt', Date.now());
 }
 
 interface ConflictBody {
   error?: string;
-  current?: Entry;
+  current?: Record<string, unknown>;
 }
 
 function isConflict(err: unknown): err is ApiError {
@@ -105,11 +119,12 @@ async function doFlush(): Promise<void> {
     for (const item of items) {
       try {
         if (item.kind === 'entry') await flushEntry(item);
+        else if (item.kind === 'knowledge') await flushKnowledge(item);
         else await flushLink(item);
         await db.outbox.delete(item.id);
       } catch (err) {
         if (isConflict(err)) {
-          await markConflict(item.itemId, err.body as ConflictBody);
+          await markConflict(item.itemId, err.body as ConflictBody, item.kind === 'knowledge' ? 'knowledge' : 'entry');
           await db.outbox.delete(item.id);
           continue;
         }
@@ -169,13 +184,54 @@ async function flushLink(item: { op: string; itemId: string }): Promise<void> {
   await db.links.put(created);
 }
 
+async function flushKnowledge(item: { op: string; itemId: string; baseVersion?: number }): Promise<void> {
+  if (item.op === 'delete') {
+    try {
+      await api.removeKnowledge(item.itemId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return;
+      throw err;
+    }
+    await db.knowledge.delete(item.itemId);
+    return;
+  }
+  const local = await db.knowledge.get(item.itemId);
+  if (!local || local.deletedAt) return;
+  const draft = knowledgeToDraft(local);
+  if (item.op === 'create') {
+    const created = await api.createKnowledge({ ...draft, id: local.id });
+    await db.knowledge.put({ ...created, deletedAt: undefined });
+  } else {
+    const updated = await api.updateKnowledge(item.itemId, draft, item.baseVersion ?? local.version);
+    await db.knowledge.put({ ...updated, deletedAt: undefined, conflict: undefined, serverCopy: undefined });
+  }
+}
+
+const knowledgeToDraft = (k: KnowledgeEntry): KnowledgeDraft => ({
+  title: k.title,
+  content: k.content,
+  domain: k.domain,
+  voidType: k.voidType,
+  taxonomy: k.taxonomy ?? [],
+  difficulty: k.difficulty ?? 2,
+  prerequisites: k.prerequisites ?? [],
+  relatedEntries: k.relatedEntries ?? [],
+  tags: k.tags ?? [],
+});
+
 /** 409 冲突：保留双方，标记待用户裁决 */
-async function markConflict(itemId: string, body: ConflictBody): Promise<void> {
+async function markConflict(itemId: string, body: ConflictBody, kind: 'entry' | 'knowledge'): Promise<void> {
   const serverRow = body.current;
   if (!serverRow) return;
+  if (kind === 'knowledge') {
+    const local = await db.knowledge.get(itemId);
+    if (!local) return;
+    await db.knowledge.put({ ...local, conflict: true, serverCopy: serverRow as unknown as KnowledgeEntry });
+    return;
+  }
   const local = await db.entries.get(itemId);
   if (!local) return;
-  await db.entries.put({ ...local, conflict: true, serverCopy: serverRow });
+  await db.entries.put({ ...local, conflict: true, serverCopy: serverRow as unknown as Entry });
 }
 
 /** 冲突裁决（见 store.ts 导出） */
@@ -209,6 +265,43 @@ export async function keepServerVersion(id: string): Promise<Entry | undefined> 
   if (!e?.serverCopy) return;
   const next: Entry = { ...e.serverCopy, deletedAt: undefined, conflict: undefined, serverCopy: undefined };
   await db.entries.put(next);
+  await db.outbox.where('itemId').equals(id).delete();
+  notifySyncChange();
+  return next;
+}
+
+/** 知识条目冲突裁决：保留本地版（以服务器版本为基准重新推送） */
+export async function keepKnowledgeLocalVersion(id: string): Promise<KnowledgeEntry | undefined> {
+  const k = await db.knowledge.get(id);
+  if (!k?.serverCopy) return;
+  const next: KnowledgeEntry = {
+    ...k,
+    ...knowledgeToDraft(k),
+    version: k.serverCopy.version,
+    conflict: undefined,
+    serverCopy: undefined,
+    updatedAt: Date.now(),
+  };
+  await db.knowledge.put(next);
+  await db.outbox.put({
+    id: crypto.randomUUID(),
+    kind: 'knowledge',
+    op: 'update',
+    itemId: id,
+    baseVersion: next.version,
+    queuedAt: Date.now(),
+  });
+  notifySyncChange();
+  void flushOutbox();
+  return next;
+}
+
+/** 知识条目冲突裁决：采用云端版 */
+export async function keepKnowledgeServerVersion(id: string): Promise<KnowledgeEntry | undefined> {
+  const k = await db.knowledge.get(id);
+  if (!k?.serverCopy) return;
+  const next: KnowledgeEntry = { ...k.serverCopy, deletedAt: undefined, conflict: undefined, serverCopy: undefined };
+  await db.knowledge.put(next);
   await db.outbox.where('itemId').equals(id).delete();
   notifySyncChange();
   return next;

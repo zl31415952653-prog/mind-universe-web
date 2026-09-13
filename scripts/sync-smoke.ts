@@ -79,14 +79,15 @@ try {
     ...patch,
   });
 
-  console.log('== 1. 注册登录 + 拉取快照（默认知识库） ==');
+  console.log('== 1. 注册登录 + 拉取快照（默认知识包） ==');
   const email = `smoke-${Date.now()}@test.local`;
   await api.register(email, 'testpass123', 'smoke');
   const r = await api.login(email, 'testpass123');
   setToken(r.token);
   await pullSnapshot();
-  const defaults = (await db.entries.toArray()).filter(e => e.isDefault);
-  assert(defaults.length === 5, `默认知识库应为 5 条，实际 ${defaults.length}`);
+  const defaults = (await db.knowledge.toArray()).filter(e => e.isDefault);
+  assert(defaults.length === 19, `默认知识包应为 19 条，实际 ${defaults.length}`);
+  assert((await db.entries.toArray()).filter(e => e.isDefault).length === 0, '经历表不应再有默认条目');
 
   console.log('== 2. 离线创建 10 条（不入队列外的推送） ==');
   for (let i = 0; i < 10; i++) {
@@ -174,10 +175,46 @@ try {
   const sug = await api.suggest(coded.id);
   assert(sug.payload.emotionLabel === '焦虑', `情绪建议应为焦虑，实际 ${sug.payload.emotionLabel}`);
 
+  console.log('== 6.8 知识库：离线创建 + 前置关系 + 导入重连 ==');
+  const { saveKnowledge, importKnowledge } = await import('../src/store');
+  const ka = await saveKnowledge('new', {
+    title: '知识A', content: 'A 的内容', domain: '测试', voidType: 'flow',
+    taxonomy: ['测试'], difficulty: 2, prerequisites: [], relatedEntries: [], tags: [],
+  }, { sync: false });
+  const kb = await saveKnowledge('new', {
+    title: '知识B', content: 'B 的内容', domain: '测试', voidType: 'silence',
+    taxonomy: ['测试'], difficulty: 3, prerequisites: [ka.id], relatedEntries: [], tags: [],
+  }, { sync: false });
+  await flushOutbox();
+  const serverKb = await api.knowledgeEntry(kb.id);
+  assert(serverKb.prerequisites.includes(ka.id), '服务器端前置关系应保持');
+  // 导入重连：oldId → newId 重写，引用不丢
+  const kbBefore = (await db.knowledge.toArray()).length;
+  const count = await importKnowledge([
+    {
+      id: 'old-a', title: '导入知识A', content: 'x', domain: '导入', voidType: 'flow',
+      taxonomy: [], difficulty: 1, prerequisites: ['old-b'], relatedEntries: [], tags: [],
+      createdAt: Date.now(), updatedAt: Date.now(),
+    },
+    {
+      id: 'old-b', title: '导入知识B', content: 'y', domain: '导入', voidType: 'silence',
+      taxonomy: [], difficulty: 1, prerequisites: [], relatedEntries: [], tags: [],
+      createdAt: Date.now(), updatedAt: Date.now(),
+    },
+  ]);
+  assert(count === 2, `导入应创建 2 条，实际 ${count}`);
+  const importedA = (await db.knowledge.toArray()).find(k => k.title === '导入知识A');
+  const importedB = (await db.knowledge.toArray()).find(k => k.title === '导入知识B');
+  assert(importedA?.prerequisites[0] === importedB?.id, '导入后前置引用应重新连接到新 id');
+  await flushOutbox();
+  assert((await db.knowledge.toArray()).length === kbBefore + 2, '导入条目应持久化在本地库');
+
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
-  const before = (await db.entries.toArray()).length;
+  const entryCount = (await db.entries.toArray()).length;
+  const knowledgeCount = (await db.knowledge.toArray()).length;
   // 模拟拉取失败（服务器不存在）——直接验证本地库仍在
-  assert(before > 10, '本地库数据应完整保留');
+  assert(entryCount >= 9, `本地经历数据应完整保留（10 条离线创建，1 条已删除），实际 ${entryCount}`);
+  assert(knowledgeCount >= 19, `本地知识数据应完整保留，实际 ${knowledgeCount}`);
 
   console.log(`\nSYNC SMOKE: 全部通过（${passed} 项断言）`);
 } finally {

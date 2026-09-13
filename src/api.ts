@@ -1,4 +1,4 @@
-import type { AttachmentMeta, Entry, EntryDraft, EntryVersion, Link, LinkInput, Suggestion, User } from './types';
+import type { AttachmentMeta, Entry, EntryDraft, EntryVersion, KnowledgeDraft, KnowledgeEntry, Link, LinkInput, Suggestion, User } from './types';
 
 const key = 'infinity-token';
 export const getToken = () => localStorage.getItem(key);
@@ -44,6 +44,7 @@ export interface ExportData {
   exportedAt: number;
   entries: Entry[];
   links: Link[];
+  knowledge: KnowledgeEntry[];
 }
 
 export const api = {
@@ -74,4 +75,12 @@ export const api = {
   removeLink: (id: string) => call<null>('/links/' + id, { method: 'DELETE' }),
   suggest: (id: string) => call<Suggestion>('/ai/suggest/' + id, { method: 'POST', body: '{}' }),
   export: () => call<ExportData>('/export'),
+  knowledge: (params: Record<string, string> = {}) =>
+    call<KnowledgeEntry[]>('/knowledge?' + new URLSearchParams(params)),
+  knowledgeEntry: (id: string) => call<KnowledgeEntry>('/knowledge/' + id),
+  createKnowledge: (k: KnowledgeDraft & { id?: string }) =>
+    call<KnowledgeEntry>('/knowledge', { method: 'POST', body: JSON.stringify(k) }),
+  updateKnowledge: (id: string, k: KnowledgeDraft, version?: number) =>
+    call<KnowledgeEntry>('/knowledge/' + id, { method: 'PUT', body: JSON.stringify({ ...k, version }) }),
+  removeKnowledge: (id: string) => call<null>('/knowledge/' + id, { method: 'DELETE' }),
 };

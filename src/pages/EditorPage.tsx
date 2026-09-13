@@ -10,10 +10,11 @@ import { TYPES, VOIDS } from '../data';
 import { db } from '../db';
 import { ALL_EMOTIONS, EMOTIONS_NEGATIVE, EMOTIONS_POSITIVE } from '../emotions';
 import { backlinksOf } from '../links';
+import { RELATION_TYPES, relationById } from '../relations';
 import { SENSORY_OPTIONS } from '../sensory';
-import { removeEntry, resolveConflict, saveEntry } from '../store';
+import { addLink, removeEntry, removeLinkLocal, resolveConflict, saveEntry } from '../store';
 import { TEMPLATES } from '../templates';
-import type { Entry, EntryDraft, EntryVersion, ExperienceType, SensoryEncoding, Suggestion, VoidId } from '../types';
+import type { Entry, EntryDraft, EntryVersion, ExperienceType, Link as LinkItem, RelationType, SensoryEncoding, Suggestion, VoidId } from '../types';
 
 const emptyDraft = (): EntryDraft => ({
   kind: 'daily',
@@ -28,6 +29,7 @@ const emptyDraft = (): EntryDraft => ({
   knowledge: { domain: '', taxonomy: [] },
   privacy: { aiVisible: false },
   attachments: [],
+  occurredAt: null,
 });
 
 const toDraft = (e: Entry): EntryDraft => ({
@@ -43,11 +45,20 @@ const toDraft = (e: Entry): EntryDraft => ({
   knowledge: e.knowledge ?? {},
   privacy: e.privacy ?? {},
   attachments: e.attachments ?? [],
+  occurredAt: e.occurredAt ?? null,
 });
 
 const fmt = (t: number) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(t);
 
-export default function EditorPage({ refresh, entries }: { refresh: () => Promise<void>; entries: Entry[] }) {
+const toLocalInput = (t?: number | null): string => {
+  if (!t) return '';
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const fromLocalInput = (s: string): number | null => (s ? new Date(s).getTime() : null);
+
+export default function EditorPage({ refresh, entries, links }: { refresh: () => Promise<void>; entries: Entry[]; links: LinkItem[] }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [draft, setDraft] = useState<EntryDraft>(emptyDraft);
@@ -58,6 +69,9 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
   const [mode, setMode] = useState<'write' | 'preview'>('write');
   const [uploading, setUploading] = useState(false);
   const [versions, setVersions] = useState<EntryVersion[] | null>(null);
+  const [linkTarget, setLinkTarget] = useState('');
+  const [linkType, setLinkType] = useState<RelationType>('similar');
+  const [linkDesc, setLinkDesc] = useState('');
 
   useEffect(() => {
     if (id === 'new' || !id) {
@@ -167,9 +181,29 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
     }
   };
 
+  const createRelation = async () => {
+    if (!id || id === 'new' || !linkTarget) return;
+    setError('');
+    try {
+      await addLink({ sourceId: id, targetId: linkTarget, relationType: linkType, description: linkDesc.trim() });
+      setLinkTarget('');
+      setLinkDesc('');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '建立关系失败');
+    }
+  };
+
+  const deleteRelation = async (linkId: string) => {
+    await removeLinkLocal(linkId);
+    await refresh();
+  };
+
   if (loading) return <p>正在载入…</p>;
 
   const backlinks = full ? backlinksOf(entries, full.title) : [];
+  const related = full ? links.filter(l => l.sourceId === full.id || l.targetId === full.id) : [];
+  const linkableEntries = entries.filter(e => !e.isDefault && e.id !== full?.id);
 
   return (
     <form className="editor" onSubmit={submit}>
@@ -218,6 +252,9 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
           </label>
           <label>标签 <small>用逗号分隔</small>
             <input value={draft.tags.join(', ')} onChange={e => update('tags', e.target.value.split(',').map(x => x.trim()).filter(Boolean))} />
+          </label>
+          <label>发生时间 <small>时间线锚点；日常经历建议填写（不填则用创建时间）</small>
+            <input type="datetime-local" value={toLocalInput(draft.occurredAt)} onChange={e => update('occurredAt', fromLocalInput(e.target.value))} />
           </label>
           <label>附件 <small>图片/音频，单个不超过 10MB；上传需要联网，附件引用随保存写入条目</small>
             <div className="attachments">
@@ -312,6 +349,33 @@ export default function EditorPage({ refresh, entries }: { refresh: () => Promis
               <p>主空：<VoidBadge id={suggestion.payload.primaryVoid} /></p>
               <p>标签：{suggestion.payload.tags.join('、') || '无'}</p>
               {suggestion.payload.emotionLabel && <p>情绪：{suggestion.payload.emotionLabel}</p>}
+            </div>
+          )}
+          {id !== 'new' && (
+            <div className="panel-block">
+              <h3>关联条目（关系）</h3>
+              {related.length === 0 && <small>还没有关系；在下方选择目标与类型建立</small>}
+              {related.map(l => {
+                const other = entries.find(e => e.id === (l.sourceId === full?.id ? l.targetId : l.sourceId));
+                const def = relationById(l.relationType);
+                return (
+                  <div key={l.id} className="relation-item">
+                    <span style={{ color: def.color }} title={def.desc}>{def.label}</span>
+                    <Link to={'/experience/' + other?.id}>{other?.title ?? '（已删除条目）'}</Link>
+                    <small>{l.sourceId === full?.id ? '→' : '←'}</small>
+                    <button type="button" title="删除关系" onClick={() => deleteRelation(l.id)}>×</button>
+                  </div>
+                );
+              })}
+              <select value={linkTarget} onChange={e => setLinkTarget(e.target.value)}>
+                <option value="">选择关联的条目…</option>
+                {linkableEntries.slice(0, 200).map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+              </select>
+              <select value={linkType} onChange={e => setLinkType(e.target.value as RelationType)}>
+                {RELATION_TYPES.map(r => <option key={r.id} value={r.id}>{r.label} — {r.desc}</option>)}
+              </select>
+              <input placeholder="关系说明（可选）" value={linkDesc} onChange={e => setLinkDesc(e.target.value)} />
+              <button type="button" className="secondary" disabled={!linkTarget} onClick={createRelation}>建立关系</button>
             </div>
           )}
           {id !== 'new' && (

@@ -2,6 +2,8 @@
 
 export type VoidId = 'void' | 'silence' | 'fracture' | 'flow' | 'mirror' | 'nexus' | 'limit';
 export type ExperienceType = 'emotional' | 'knowledge' | 'daily';
+/** 八类关系（方案书 2.3：因果/相似/冲突/启发/转化/对照/包含/前置） */
+export type RelationType = 'causal' | 'similar' | 'conflict' | 'inspiration' | 'transform' | 'contrast' | 'contains' | 'prerequisite';
 
 export interface VoidDef {
   id: VoidId;
@@ -68,6 +70,8 @@ export interface Entry {
   knowledge: KnowledgeEncoding;
   privacy: Privacy;
   attachments?: AttachmentMeta[];
+  /** 发生时间（时间线锚点；日常经历建议填写） */
+  occurredAt?: number | null;
   source?: string | null;
   isDefault?: boolean;
   createdAt: number;
@@ -147,6 +151,7 @@ export interface EntryDraft {
   knowledge: KnowledgeEncoding;
   privacy: Privacy;
   attachments?: AttachmentMeta[];
+  occurredAt?: number | null;
 }
 
 export interface Link {

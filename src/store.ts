@@ -7,7 +7,7 @@ import {
   keepServerVersion,
   notifySyncChange,
 } from './sync';
-import type { Entry, EntryDraft, KnowledgeDraft, KnowledgeEntry } from './types';
+import type { Entry, EntryDraft, KnowledgeDraft, KnowledgeEntry, Link, RelationType } from './types';
 
 /**
  * 数据仓库（本地优先）：
@@ -61,6 +61,34 @@ export async function removeEntry(id: string, opts: MutOpts = {}): Promise<void>
 
 export async function resolveConflict(id: string, keep: 'local' | 'server'): Promise<Entry | undefined> {
   return keep === 'local' ? keepLocalVersion(id) : keepServerVersion(id);
+}
+
+// ---------- 关系（本地优先，入同步队列） ----------
+
+export async function addLink(input: { sourceId: string; targetId: string; relationType: RelationType; description?: string; strength?: number }): Promise<Link> {
+  const link: Link = {
+    id: crypto.randomUUID(),
+    sourceId: input.sourceId,
+    targetId: input.targetId,
+    relationType: input.relationType,
+    description: input.description ?? '',
+    strength: input.strength ?? 0.5,
+    source: 'user',
+    status: 'accepted',
+    createdAt: Date.now(),
+  };
+  await db.links.put(link);
+  await db.outbox.put({ id: crypto.randomUUID(), kind: 'link', op: 'create', itemId: link.id, queuedAt: Date.now() });
+  notifySyncChange();
+  void flushOutbox();
+  return link;
+}
+
+export async function removeLinkLocal(id: string): Promise<void> {
+  await db.links.delete(id);
+  await db.outbox.put({ id: crypto.randomUUID(), kind: 'link', op: 'delete', itemId: id, queuedAt: Date.now() });
+  notifySyncChange();
+  void flushOutbox();
 }
 
 // ---------- 知识库（本地优先，与经历同一套同步队列） ----------

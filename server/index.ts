@@ -41,6 +41,7 @@ const rowToEntry = (row: SqlRow) => row && ({
   privacy: parse<Record<string, unknown>>(row.privacy, {}),
   attachments: parse<AttachmentMeta[]>(row.attachments, []),
   sensory: parse<Record<string, unknown>>(row.sensory, {}),
+  occurredAt: row.occurred_at ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   deletedAt: row.deleted_at,
@@ -195,12 +196,13 @@ app.post('/api/entries', requireUser, (req, res) => {
     privacy: { aiVisible: false, ...((b.privacy as Record<string, unknown>) || {}) },
     attachments: (b.attachments as unknown[]) || [],
     sensory: (b.sensory as Record<string, unknown>) || {},
+    occurredAt: (b.occurredAt as number | null | undefined) ?? null,
     source: (b.source as string | null | undefined) || null,
     t: now(),
   };
   try {
-    db.prepare(`INSERT INTO entries (id,owner_id,kind,title,content,primary_void,secondary_voids,tags,emotion,encoding,knowledge,privacy,attachments,sensory,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(entry.id, entry.ownerId, entry.kind, entry.title, entry.content, entry.primaryVoid, JSON.stringify(entry.secondaryVoids), JSON.stringify(entry.tags), JSON.stringify(entry.emotion), JSON.stringify(entry.encoding), JSON.stringify(entry.knowledge), JSON.stringify(entry.privacy), JSON.stringify(entry.attachments), JSON.stringify(entry.sensory), entry.source, entry.t, entry.t);
+    db.prepare(`INSERT INTO entries (id,owner_id,kind,title,content,primary_void,secondary_voids,tags,emotion,encoding,knowledge,privacy,attachments,sensory,occurred_at,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(entry.id, entry.ownerId, entry.kind, entry.title, entry.content, entry.primaryVoid, JSON.stringify(entry.secondaryVoids), JSON.stringify(entry.tags), JSON.stringify(entry.emotion), JSON.stringify(entry.encoding), JSON.stringify(entry.knowledge), JSON.stringify(entry.privacy), JSON.stringify(entry.attachments), JSON.stringify(entry.sensory), entry.occurredAt, entry.source, entry.t, entry.t);
     audit(entry.ownerId, 'entry.create', { entryId: entry.id });
     res.status(201).json(rowToEntry(db.prepare('SELECT * FROM entries WHERE id=?').get(entry.id) as EntryRow));
   } catch (err) {
@@ -223,11 +225,12 @@ app.put('/api/entries/:id', requireUser, (req, res) => {
   const next = { ...rowToEntry(old), ...b } as unknown as {
     kind: string; title: string; content: string; primaryVoid: string;
     secondaryVoids: unknown; tags: unknown; emotion: unknown; encoding: unknown;
-    knowledge: unknown; privacy: unknown; attachments: unknown; sensory: unknown; source: string | null;
+    knowledge: unknown; privacy: unknown; attachments: unknown; sensory: unknown;
+    occurredAt: number | null; source: string | null;
   };
   const t = now();
-  db.prepare(`UPDATE entries SET kind=?,title=?,content=?,primary_void=?,secondary_voids=?,tags=?,emotion=?,encoding=?,knowledge=?,privacy=?,attachments=?,sensory=?,source=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
-    .run(next.kind, next.title, next.content, next.primaryVoid, JSON.stringify(next.secondaryVoids || []), JSON.stringify(next.tags || []), JSON.stringify(next.emotion || {}), JSON.stringify(next.encoding || {}), JSON.stringify(next.knowledge || {}), JSON.stringify(next.privacy || {}), JSON.stringify(next.attachments || []), JSON.stringify(next.sensory || {}), next.source || null, t, req.params.id, req.user!.sub);
+  db.prepare(`UPDATE entries SET kind=?,title=?,content=?,primary_void=?,secondary_voids=?,tags=?,emotion=?,encoding=?,knowledge=?,privacy=?,attachments=?,sensory=?,occurred_at=?,source=?,updated_at=?,version=version+1 WHERE id=? AND owner_id=?`)
+    .run(next.kind, next.title, next.content, next.primaryVoid, JSON.stringify(next.secondaryVoids || []), JSON.stringify(next.tags || []), JSON.stringify(next.emotion || {}), JSON.stringify(next.encoding || {}), JSON.stringify(next.knowledge || {}), JSON.stringify(next.privacy || {}), JSON.stringify(next.attachments || []), JSON.stringify(next.sensory || {}), next.occurredAt ?? null, next.source || null, t, req.params.id, req.user!.sub);
   audit(req.user!.sub, 'entry.update', { entryId: req.params.id });
   res.json(rowToEntry(db.prepare('SELECT * FROM entries WHERE id=?').get(req.params.id) as EntryRow));
 });
@@ -252,12 +255,13 @@ app.post('/api/links', requireUser, (req, res) => {
     res.status(400).json({ error: '请选择两个不同条目' });
     return;
   }
+  const RELATION_TYPES = new Set(['causal', 'similar', 'conflict', 'inspiration', 'transform', 'contrast', 'contains', 'prerequisite']);
   const link = {
     id: uuidRe.test(String(b.id || '')) ? String(b.id) : id(),
     owner: req.user!.sub,
     source: String(b.sourceId),
     target: String(b.targetId),
-    type: String(b.relationType || 'similar'),
+    type: RELATION_TYPES.has(String(b.relationType)) ? String(b.relationType) : 'similar',
     desc: String(b.description || ''),
     strength: Math.max(0, Math.min(1, Number(b.strength ?? 0.5))),
     t: now(),

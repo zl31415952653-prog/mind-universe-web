@@ -209,6 +209,26 @@ try {
   await flushOutbox();
   assert((await db.knowledge.toArray()).length === kbBefore + 2, '导入条目应持久化在本地库');
 
+  console.log('== 6.9 关系：离线建立/删除 + 发生时间往返 ==');
+  const { addLink, removeLinkLocal } = await import('../src/store');
+  const relSource = (await db.entries.toArray()).find(e => e.title === '离线1');
+  const relTarget = (await db.entries.toArray()).find(e => e.title === '离线2');
+  assert(!!relSource && !!relTarget, '应有可关联的两条经历');
+  const rel = await addLink({ sourceId: relSource!.id, targetId: relTarget!.id, relationType: 'causal', description: '测试因果' });
+  await flushOutbox();
+  const serverLinks = await api.links();
+  assert(serverLinks.some(l => l.id === rel.id && l.relationType === 'causal'), '关系应推送到服务器并保持类型');
+  await removeLinkLocal(rel.id);
+  await flushOutbox();
+  assert(!(await api.links()).some(l => l.id === rel.id), '删除后服务器不应再有该关系');
+  const timed = await api.create({
+    kind: 'daily', title: '带发生时间的条目', content: 'x', primaryVoid: 'flow',
+    secondaryVoids: [], tags: [], emotion: {}, encoding: { color: null }, sensory: {},
+    knowledge: {}, privacy: { aiVisible: false }, attachments: [], occurredAt: 1752600000000,
+  });
+  const timedBack = await api.entry(timed.id);
+  assert(timedBack.occurredAt === 1752600000000, '发生时间应往返一致');
+
   console.log('== 7. 断网兜底：拉取失败时本地数据可用 ==');
   const entryCount = (await db.entries.toArray()).length;
   const knowledgeCount = (await db.knowledge.toArray()).length;

@@ -28,6 +28,7 @@ export interface EntryRow {
   privacy: string;
   attachments: string;
   sensory: string;
+  occurred_at: number | null;
   source: string | null;
   is_default: number;
   created_at: number;

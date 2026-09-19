@@ -1,0 +1,2 @@
+import {hash} from '../../_lib/auth.js';
+export async function onRequestPost(context){const token=(context.request.headers.get('Cookie')||'').match(/(?:^|;\s*)infinity_session=([^;]+)/)?.[1];if(token)await context.env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(token,'session')).run();return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json','Set-Cookie':'infinity_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'}})}

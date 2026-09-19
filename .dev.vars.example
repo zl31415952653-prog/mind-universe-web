@@ -1,0 +1,3 @@
+DEEPSEEK_API_KEY=replace-with-your-server-side-key
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-flash

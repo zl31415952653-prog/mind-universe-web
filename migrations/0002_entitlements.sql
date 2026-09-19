@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS entitlements (user_id TEXT PRIMARY KEY, plan TEXT NOT NULL DEFAULT 'free', ai_record_credits INTEGER NOT NULL DEFAULT 3, ai_reflection_credits INTEGER NOT NULL DEFAULT 1, period_started_at INTEGER NOT NULL, period_ends_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS ai_usage (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, capability TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS ai_usage_user_created ON ai_usage(user_id,created_at);

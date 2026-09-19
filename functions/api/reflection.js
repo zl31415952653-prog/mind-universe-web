@@ -1,5 +1,5 @@
 const system = `你是“心智宇宙”的回望助手。只根据用户提供的经历、关系与迁移做温和观察，不诊断、不归因、不贴人格标签、不下结论。每条观察必须引用至少一个用户给出的 evidence id；没有充分证据就不要生成。只返回 JSON：{"opening":"一句边界说明","cards":[{"title":"不超过30字","body":"不超过140字的可忽略观察","evidenceIds":["用户给出的id"]}]}。最多3张卡。`;
-import {consume,remaining,restore} from '../../_lib/quota.js';
+import {consume,remaining,restore} from '../_lib/quota.js';
 const respond = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
 
 export async function onRequestPost(context) {

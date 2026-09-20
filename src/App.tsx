@@ -12,6 +12,7 @@ import './dialogue.css';
 import './explorer.css';
 import './mobile.css';
 import './ui.css';
+import './atmosphere.css';
 import LearningWorkbench from './LearningWorkbench';
 import NotesWorkspace from './NotesWorkspace';
 import DiscoveryPanel from './DiscoveryPanel';

@@ -50,7 +50,7 @@ function App() {
   const [selectedKnowledge, setSelectedKnowledge] = useState<KnowledgeEntry | null>(null);
   const [relations, setRelations] = useState<Relation[]>(initial.relations);
   const [transitions, setTransitions] = useState<Transition[]>(initial.transitions);
-  const [selected, setSelected] = useState<Entry | null>(initial.entries[1]);
+  const [selected, setSelected] = useState<Entry | null>(null);
   const [composer, setComposer] = useState(false);
   const [dialogue, setDialogue] = useState(false);
   const [knowledgeStudio, setKnowledgeStudio] = useState(false);
@@ -71,7 +71,7 @@ function App() {
       if (!active) return;
       setEntries(atlas.entries); setKnowledge(atlas.knowledge); setRelations(atlas.relations); setTransitions(atlas.transitions);
       setLearningProjects(atlas.learningProjects); setLearningMaterials(atlas.learningMaterials); setLearningSuggestions(atlas.learningSuggestions); setLearningTasks(atlas.learningTasks); setKnowledgeRelations(atlas.knowledgeRelations); setDiscoverySuggestions(atlas.discoverySuggestions); setAuthorizationAudit(atlas.authorizationAudit);
-      setSelected(current => atlas.entries.find(e => e.id === current?.id) ?? atlas.entries[0] ?? null);
+      setSelected(current => current ? (atlas.entries.find(e => e.id === current.id) ?? null) : null);
       setHiddenReflections(hidden); setStorageReady(true);
     }).catch(() => { if (active) setStorageReady(true); });
     return () => { active = false; };
@@ -181,7 +181,7 @@ function App() {
   const hideReflection = (id: string) => { const next = [...hiddenReflections, id]; setHiddenReflections(next); void saveHiddenReflections(next); };
   const restoreBackup = (atlas: Atlas, hidden: string[]) => {
     persist(atlas.entries, atlas.relations, atlas.transitions, atlas.knowledge, atlas.learningProjects, atlas.learningMaterials, atlas.learningSuggestions, atlas.learningTasks, atlas.knowledgeRelations, atlas.discoverySuggestions, atlas.authorizationAudit);
-    setSelected(atlas.entries[0] ?? null); setSelectedKnowledge(null);
+    setSelected(null); setSelectedKnowledge(null);
     setHiddenReflections(hidden); void saveHiddenReflections(hidden);
   };
   const insight = selected?.insight || (selected ? `这段经历正停在「${getVoid(selected.primaryVoid).name}」。不必急着解决它；先问问自己：${getVoid(selected.primaryVoid).question}` : '选择一颗星尘，宇宙会向你展示它留下的痕迹。');

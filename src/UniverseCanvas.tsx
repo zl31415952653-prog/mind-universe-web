@@ -75,10 +75,9 @@ export default function UniverseCanvas({ entries, knowledge, knowledgeRelations,
     const onDown=(e:PointerEvent)=>{down={x:e.clientX,y:e.clientY};};
     const onMove=(e:PointerEvent)=>{if(!down)return; yaw-=(e.clientX-down.x)*.006; pitch=Math.max(-.3,Math.min(.28,pitch+(e.clientY-down.y)*.003));down={x:e.clientX,y:e.clientY};};
     const onUp=(e:PointerEvent)=>{if(!down)return; const rect=renderer.domElement.getBoundingClientRect(); pointer.x=((e.clientX-rect.left)/rect.width)*2-1; pointer.y=-((e.clientY-rect.top)/rect.height)*2+1; raycaster.setFromCamera(pointer,camera); const targets=[...entryGroup.children,...knowledgeGroup.children].filter(o=>o instanceof THREE.Mesh); const object=raycaster.intersectObjects(targets)[0]?.object; const entry=object?.userData.entry as Entry|undefined; const item=object?.userData.knowledge as KnowledgeEntry|undefined; if(entry)select.current(entry); if(item)selectKnowledge.current(item);down=null;};
-    const onWheel=(e:WheelEvent)=>{distance=Math.max(16,Math.min(36,distance+e.deltaY*.012));};
-    const ro=new ResizeObserver(resize);ro.observe(el);renderer.domElement.addEventListener('pointerdown',onDown);renderer.domElement.addEventListener('pointermove',onMove);renderer.domElement.addEventListener('pointerup',onUp);renderer.domElement.addEventListener('wheel',onWheel,{passive:true});
+    const ro=new ResizeObserver(resize);ro.observe(el);renderer.domElement.addEventListener('pointerdown',onDown);renderer.domElement.addEventListener('pointermove',onMove);renderer.domElement.addEventListener('pointerup',onUp);
     let frame=0; const animate=()=>{frame=requestAnimationFrame(animate);if(lens==='atlas')root.rotation.z+=.00045;moveCamera();renderer.render(scene,camera);};animate();
-    return()=>{cancelAnimationFrame(frame);ro.disconnect();renderer.domElement.removeEventListener('pointerdown',onDown);renderer.domElement.removeEventListener('pointermove',onMove);renderer.domElement.removeEventListener('pointerup',onUp);renderer.domElement.removeEventListener('wheel',onWheel);renderer.dispose();el.innerHTML='';};
+    return()=>{cancelAnimationFrame(frame);ro.disconnect();renderer.domElement.removeEventListener('pointerdown',onDown);renderer.domElement.removeEventListener('pointermove',onMove);renderer.domElement.removeEventListener('pointerup',onUp);renderer.dispose();el.innerHTML='';};
   },[entries, knowledge, knowledgeRelations, relations, transitions, selectedId, lens]);
   return <div ref={host} className="universe-canvas" aria-label="可旋转的七空宇宙，点击星尘查看经历" />;
 }

@@ -27,7 +27,6 @@ import { defaultKnowledgePack } from './defaultKnowledge';
 
 const colors = [['靛青','#5968d9'],['青碧','#2dbb9c'],['朱砂','#ef5b61'],['月白','#bac8dd'],['明黄','#f3c75f'],['紫檀','#ad69e5']];
 const emotions = ['好奇','平静','迷茫','欣喜','焦虑','悲伤','愤怒','松动','笃定'];
-const relationLabels = { resonance: '共鸣', tension: '张力', thread: '线索' };
 type TimeRange = 'all' | '7d' | '30d' | '90d' | 'year';
 type UniverseLens = 'atlas' | 'connections' | 'path' | 'knowledge';
 const rangeLabels: Record<TimeRange,string> = { all:'所有时间', '7d':'近 7 天', '30d':'近 30 天', '90d':'近 90 天', year:'今年' };
@@ -177,8 +176,6 @@ function App() {
     const nextAudit = [...authorizationAudit, { id: crypto.randomUUID(), entryId, grantId, action: 'revoked' as const, createdAt: Date.now() }];
     persist(nextEntries, relations, transitions, knowledge, learningProjects, learningMaterials, learningSuggestions, learningTasks, knowledgeRelations, discoverySuggestions, nextAudit);
   };
-  const selectedRelations = selected ? relations.filter(r => r.from === selected.id || r.to === selected.id) : [];
-  const selectedTransitions = selected ? transitions.filter(t => t.entryId === selected.id) : [];
   const reflections = buildReflections(entries, relations, transitions).filter(item => !hiddenReflections.includes(item.id));
   const questionThreads = buildQuestionThreads(entries, relations);
   const hideReflection = (id: string) => { const next = [...hiddenReflections, id]; setHiddenReflections(next); void saveHiddenReflections(next); };
@@ -187,7 +184,6 @@ function App() {
     setSelected(null); setSelectedKnowledge(null);
     setHiddenReflections(hidden); void saveHiddenReflections(hidden);
   };
-  const insight = selected?.insight || (selected ? `这段经历正停在「${getVoid(selected.primaryVoid).name}」。不必急着解决它；先问问自己：${getVoid(selected.primaryVoid).question}` : '选择一颗星尘，宇宙会向你展示它留下的痕迹。');
   if (learningOpen) return <LearningWorkbench projects={learningProjects} materials={learningMaterials} suggestions={learningSuggestions} tasks={learningTasks} knowledge={knowledge} knowledgeRelations={knowledgeRelations} onClose={()=>setLearningOpen(false)} onCreateProject={createLearningProject} onIngestMaterial={ingestLearningMaterial} onConfirm={confirmLearningSuggestion} onToggleTask={toggleLearningTask} onAddKnowledgeRelation={addKnowledgeRelation}/>;
   if (notesOpen) return <NotesWorkspace entries={entries} onClose={()=>setNotesOpen(false)} onSave={saveNote} onDelete={deleteNote} onSelect={entry=>{setSelected(entry);setNotesOpen(false);}}/>;
   return <main className="app-shell"><div className="cosmic-meteors" aria-hidden="true" />

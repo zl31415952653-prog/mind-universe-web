@@ -46,7 +46,7 @@ test('configuration fails closed; public endpoint contains no secrets', async ()
 });
 test('PKCE RFC vector; flow cookie secure and session hashes deterministic', async () => {
   assert.equal(await pkceChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'), 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
-  assert.match(flowCookie(browser), /HttpOnly; Secure; SameSite=Lax; Max-Age=600/);
+  assert.match(flowCookie(browser), /HttpOnly; Secure; SameSite=None; Max-Age=600/);
   assert.equal(await sessionHash(`v2_${state}`), `v2:${await sha256(`v2_${state}`)}`);
 });
 test('start creates short-lived flow and redirects only to configured provider', async () => {

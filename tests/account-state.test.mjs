@@ -45,6 +45,9 @@ test('callback text preserves uncertainty and accepts only safe stage and refere
   const provider = callbackMessage(new URLSearchParams('account_result=provider&account_stage=token&account_ref=123456abcdef'));
   assert.match(provider, /交换认证凭证/);
   assert.match(provider, /123456abcdef/);
+  const missingCookie = callbackMessage(new URLSearchParams('account_result=invalid&account_stage=flow&account_reason=cookie&account_ref=654321abcdef'));
+  assert.match(missingCookie, /没有带回一次性登录校验 Cookie/);
+  assert.match(missingCookie, /654321abcdef/);
   const unsafe = callbackMessage(new URLSearchParams('account_result=service&account_stage=secret-value&account_ref=private-token'));
   assert.doesNotMatch(unsafe, /secret-value|private-token/);
 });

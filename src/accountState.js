@@ -38,9 +38,17 @@ export function callbackMessage(params) {
   const result = params.get('account_result');
   if (!result) return '';
   let message = messages[result] || '请重新发起登录。';
+  const reasons = {
+    state: '认证服务没有返回有效的登录校验值。',
+    cookie: '浏览器没有带回一次性登录校验 Cookie。',
+    flow: '一次性登录记录不存在、已过期或已被使用。',
+    code: '认证服务没有返回有效授权码。'
+  };
   const stage = stages[params.get('account_stage')];
   const ref = params.get('account_ref');
-  if (['service', 'provider'].includes(result) && stage) message += ` 失败环节：${stage}。`;
-  if (['service', 'provider'].includes(result) && /^[a-f0-9]{12}$/.test(ref || '')) message += ` 排查编号：${ref}。`;
+  const reason = reasons[params.get('account_reason')];
+  if (result === 'invalid' && reason) message += ` ${reason}`;
+  if (['service', 'provider', 'invalid'].includes(result) && stage) message += ` 失败环节：${stage}。`;
+  if (['service', 'provider', 'invalid'].includes(result) && /^[a-f0-9]{12}$/.test(ref || '')) message += ` 排查编号：${ref}。`;
   return message;
 }

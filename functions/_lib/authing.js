@@ -17,7 +17,8 @@ export function redirect(location, cookies = []) {
   for (const value of cookies) headers.append('Set-Cookie', value);
   return new Response(null, { status: 303, headers });
 }
-export const flowCookie = (value, age = 600) => `${flowCookieName}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
+// OIDC 从 Authing 跨站返回；随机浏览器绑定值同时受 state、D1 单次消费和 10 分钟时限保护。
+export const flowCookie = (value, age = 600) => `${flowCookieName}=${value}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${age}`;
 export async function sha256(value) {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
@@ -55,19 +56,25 @@ export async function callbackAuth(context) {
     console.error(JSON.stringify({ event: 'authing_provider_rejected', stage, status, ref }));
     return redirect(`${cfg.origin}/?account_result=provider&account_stage=${stage}&account_ref=${ref}`, [flowCookie('', 0)]);
   };
+  const invalidFail = reason => {
+    const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    console.error(JSON.stringify({ event: 'authing_callback_invalid', stage, reason, ref }));
+    return redirect(`${cfg.origin}/?account_result=invalid&account_stage=${stage}&account_reason=${reason}&account_ref=${ref}`, [flowCookie('', 0)]);
+  };
   try {
-    if (new URL(context.request.url).origin !== cfg.origin) return fail('invalid');
+    if (new URL(context.request.url).origin !== cfg.origin) return invalidFail('origin');
     const url = new URL(context.request.url);
     const state = url.searchParams.get('state');
     const browser = (context.request.headers.get('Cookie') || '').match(/(?:^|;\s*)__Host-infinity_oidc=([a-f0-9]{64})(?:;|$)/)?.[1];
-    if (!state || !/^[a-f0-9]{64}$/.test(state) || !browser) return fail('invalid');
+    if (!state || !/^[a-f0-9]{64}$/.test(state)) return invalidFail('state');
+    if (!browser) return invalidFail('cookie');
     // 单次消费且绑定发起登录的浏览器；重放、跨浏览器、过期回调均拒绝。
     const flow = await context.env.DB.prepare('DELETE FROM auth_login_flows WHERE state_hash=? AND browser_hash=? AND expires_at>? RETURNING verifier,nonce')
       .bind(await sha256(state), await sha256(browser), Date.now()).first();
-    if (!flow) return fail('invalid');
+    if (!flow) return invalidFail('flow');
     if (url.searchParams.has('error')) return fail('cancelled');
     const code = url.searchParams.get('code');
-    if (!code || code.length > 4096) return fail('invalid');
+    if (!code || code.length > 4096) return invalidFail('code');
     stage = 'token';
     const tokenResponse = await fetch(`${cfg.issuer}/token`, {
       // workerd 不支持 redirect:error；manual 不跟随跳转，非 2xx 在下方拒绝。

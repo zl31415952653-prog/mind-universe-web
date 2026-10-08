@@ -75,14 +75,16 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
   const {privateKey: wrongKey} = await generateKeyPair('RS256');
   const jwk = {...await exportJWK(publicKey), kid:'fixture-key', alg:'RS256', use:'sig'};
   const oldFetch = globalThis.fetch;
-  let claims = {}, tokenStatus = 200, badSignature = false;
+  let claims = {}, tokenStatus = 200, profileStatus = 200, badSignature = false;
   let tokenCalls = 0;
   globalThis.fetch = async (input, init) => {
+    // 对齐 workerd：error 模式在请求发送前就会失败，不能只依赖 Node 行为。
+    if (init?.redirect === 'error') throw new TypeError('Invalid redirect value');
     const url = String(input);
     if (url.endsWith('/jwks.json')) return Response.json({keys:[jwk]});
     if (url.endsWith('/token')) {
       tokenCalls++;
-      assert.equal(init.redirect,'error');
+      assert.equal(init.redirect,'manual');
       assert.match(init.headers.Authorization,/^Basic /);
       assert.equal(init.body.get('code_verifier'),'v'.repeat(64));
       if (tokenStatus !== 200) return Response.json({error:'private provider message'}, {status:tokenStatus});
@@ -90,7 +92,10 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
         .setProtectedHeader({alg:'RS256',kid:'fixture-key'}).setIssuer(issuer).setAudience(claims.aud || 'synthetic-client').setSubject('fixture-subject').setIssuedAt().setExpirationTime('5m').sign(badSignature ? wrongKey : privateKey);
       return Response.json({id_token:jwt,access_token:'synthetic-token'});
     }
-    if (url.endsWith('/me')) return Response.json({sub:'fixture-subject',email:'fixture@example.test',email_verified:false});
+    if (url.endsWith('/me')) {
+      assert.equal(init.redirect,'manual');
+      return Response.json({sub:'fixture-subject',email:'fixture@example.test',email_verified:false}, {status:profileStatus});
+    }
     throw new Error('Unexpected URL');
   };
   try {
@@ -111,6 +116,11 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
     badSignature = false;
     claims = {email_verified:false};
     assert.match((await callbackAuth(context(fakeDb()))).headers.get('Location'),/account_result=verify_email/);
+    profileStatus = 302;
+    const profileRedirectDb = fakeDb();
+    assert.match((await callbackAuth(context(profileRedirectDb))).headers.get('Location'),/account_result=provider/);
+    assert.equal(profileRedirectDb.writes.length,0);
+    profileStatus = 200;
     claims = {};
     const collision = fakeDb({emailConflict:true});
     assert.match((await callbackAuth(context(collision))).headers.get('Location'),/account_result=existing_account/);
@@ -144,6 +154,12 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
       assert.equal((await logout(requestFor('POST'))).status,200);
       assert.equal((await readAtlas(requestFor('GET'))).status,401);
     } finally { sqlite.close(); }
+    tokenStatus = 302;
+    const redirectDb = fakeDb();
+    const providerRedirect = await callbackAuth(context(redirectDb));
+    assert.match(providerRedirect.headers.get('Location'),/account_result=provider/);
+    assert.equal(redirectDb.writes.length,0);
+    assert.ok(!providerRedirect.headers.get('Set-Cookie').includes('infinity_session='));
     tokenStatus = 401;
     const unavailable = await callbackAuth(context(fakeDb()));
     assert.match(unavailable.headers.get('Location'),/account_result=provider/);

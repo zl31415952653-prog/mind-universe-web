@@ -65,7 +65,8 @@ export async function callbackAuth(context) {
     if (!code || code.length > 4096) return fail('invalid');
     stage = 'token';
     const tokenResponse = await fetch(`${cfg.issuer}/token`, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+      // workerd 不支持 redirect:error；manual 不跟随跳转，非 2xx 在下方拒绝。
+      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10000),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${btoa(`${encodeURIComponent(cfg.clientId)}:${encodeURIComponent(cfg.secret)}`)}` },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cfg.redirect, code_verifier: flow.verifier })
     });
@@ -82,7 +83,7 @@ export async function callbackAuth(context) {
     let profile = payload;
     if (typeof profile.email !== 'string' || profile.email_verified !== true) {
       if (typeof token.access_token !== 'string') return fail('verify_email');
-      const response = await fetch(`${cfg.issuer}/me`, { headers: { Authorization: `Bearer ${token.access_token}` }, redirect: 'error', signal: AbortSignal.timeout(10000) });
+      const response = await fetch(`${cfg.issuer}/me`, { headers: { Authorization: `Bearer ${token.access_token}` }, redirect: 'manual', signal: AbortSignal.timeout(10000) });
       if (!response.ok) return fail('provider');
       profile = await response.json();
       if (profile.sub !== payload.sub) return fail('invalid');

@@ -157,3 +157,24 @@ test('Authing mode blocks old password endpoints and old sessions without runnin
   assert.equal(await userFrom({...ctx,request:new Request(origin,{headers:{Cookie:'infinity_session=legacy-token'}})}),null);
   assert.equal((await logout({...ctx,request:new Request(origin,{method:'POST',headers:{Origin:'https://other.example'}})})).status,403);
 });
+
+test('callback failures expose only a safe stage/category/reference, never credentials or raw errors', async () => {
+  const oldFetch = globalThis.fetch, oldError = console.error;
+  const logs = [];
+  console.error = value => logs.push(value);
+  try {
+    const brokenDb = { prepare() { throw new Error('sensitive sql, email and token'); } };
+    const databaseFailure = await callbackAuth(context(brokenDb));
+    const dbUrl = new URL(databaseFailure.headers.get('Location'));
+    assert.equal(dbUrl.searchParams.get('account_stage'), 'flow');
+    assert.match(dbUrl.searchParams.get('account_ref'), /^[a-f0-9]{12}$/);
+    globalThis.fetch = async () => { throw new DOMException('sensitive provider response and secret', 'TimeoutError'); };
+    const tokenFailure = await callbackAuth(context(fakeDb()));
+    assert.equal(new URL(tokenFailure.headers.get('Location')).searchParams.get('account_stage'), 'token');
+    assert.ok(!tokenFailure.headers.get('Set-Cookie').includes('infinity_session='));
+    assert.equal(JSON.parse(logs[0]).category, 'DATABASE_OPERATION_FAILED');
+    assert.equal(JSON.parse(logs[1]).category, 'NETWORK_TIMEOUT');
+    assert.doesNotMatch(logs.join(''), /sensitive|synthetic-code|synthetic-secret|email and token/);
+    assert.doesNotMatch(tokenFailure.headers.get('Location'), /sensitive|synthetic-code|synthetic-secret/);
+  } finally { globalThis.fetch = oldFetch; console.error = oldError; }
+});

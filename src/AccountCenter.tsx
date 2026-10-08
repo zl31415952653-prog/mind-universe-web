@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { Atlas } from './storage';
 import './account.css';
+import { checkAccount, callbackMessage } from './accountState.js';
 
 type User = { id: string; email: string };
 type Props = { atlas: Atlas; onRestore: (atlas: Atlas) => void };
@@ -20,35 +21,41 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [authConfig, setAuthConfig] = useState<{ provider: string; ready: boolean } | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [checkError, setCheckError] = useState('');
+  const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'anonymous' | 'error'>('checking');
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    void fetch('/api/auth/config').then(async response => {
-      if (!response.ok) throw new Error('config');
-      const value = await response.json() as { provider: string; ready: boolean };
-      if (!['authing', 'legacy'].includes(value.provider)) throw new Error('config');
-      setAuthConfig(value);
-    }).catch(() => setMessage('账户服务未就绪；本地记录仍可使用。'));
     const url = new URL(window.location.href);
-    const result = url.searchParams.get('account_result');
-    const messages: Record<string, string> = {
-      success: '认证回调已完成，正在核对本站登录状态。本地数据不会自动上传。',
-      invalid: '登录校验已失效或不匹配，请重新发起登录。',
-      cancelled: '登录已取消。本地资料不受影响。',
-      provider: '认证服务未完成登录，请核对 Authing 的授权码和令牌配置。',
-      verify_email: '请先在 Authing 验证邮箱，再重新登录。',
-      existing_account: '该邮箱存在旧账户。为保护原快照，不会自动合并，请联系维护者进行迁移核对。',
-      service: '登录接收失败，请维护者核对 D1 迁移及服务配置。本地资料仍保留。'
-    };
-    if (result) {
-      setMessage(messages[result] || '请重新发起登录。');
-      url.searchParams.delete('account_result');
+    const resultMessage = callbackMessage(url.searchParams);
+    if (resultMessage) {
+      setMessage(resultMessage);
+      for (const name of ['account_result', 'account_stage', 'account_ref']) url.searchParams.delete(name);
       window.history.replaceState(null, '', url.href);
     }
-    void fetch('/api/auth/me', { credentials: 'include' })
-      .then(async response => response.ok ? (await response.json() as { user: User }).user : null)
-      .then(setUser)
-      .catch(() => setMessage('无法连接账户服务，请检查网络后重试。'));
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12000);
+    setChecking(true); setCheckError(''); setSessionStatus('checking');
+    void checkAccount(fetch, controller.signal).then(({ config, session }) => {
+      if (!active) return;
+      setAuthConfig(config.value); setUser(session.value); setSessionStatus(session.status);
+      setChecking(false);
+      if (session.status === 'ready') {
+        setMessage('已确认本站登录成功。本地笔记没有因登录而上传，云端快照仍需你主动保存。');
+      } else if (session.status === 'anonymous') {
+        setMessage(previous => previous.startsWith('认证已返回') ? '认证已返回，但本站未建立有效登录会话。请重新登录；若再次失败，由维护者排查。' : previous);
+      }
+      if (config.status === 'error' || session.status === 'error') {
+        setCheckError(session.status === 'ready' ? '本站登录已确认，但账户入口配置检查失败，可重新检查。本地记录不受影响。' : session.status === 'anonymous' ? '本站当前未登录；账户入口检查失败，可重新检查。本地记录不受影响。' : '账户状态检查失败或超时，暂时无法确认登录。请点击“重新检查”；本地记录不受影响。');
+      }
+    }).finally(() => window.clearTimeout(timeout));
+    return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
+  }, [retry]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage('');
@@ -58,7 +65,8 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
       });
       const body = await response.json().catch(() => ({})) as { user?: User; error?: string };
       if (!response.ok) throw new Error(accountError(response, body.error || '暂时无法完成账户操作。'));
-      setUser(body.user ?? null); setPassword('');
+      if (!body.user?.id || !body.user.email) throw new Error('账户返回信息不完整，尚未确认登录成功。');
+      setUser(body.user); setSessionStatus('ready'); setPassword('');
       setMessage(mode === 'login' ? '已登录。本地数据仍不会自动上传。' : '账户已创建。本地数据仍不会自动上传。');
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : '无法连接账户服务，请检查网络后重试。');
@@ -69,6 +77,7 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
     setBusy(true); setMessage('');
     try {
       const response = await fetch('/api/atlas', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(atlas) });
+      if (response.status === 401) { setUser(null); setSessionStatus('anonymous'); }
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(accountError(response, body.error || '同步失败。', 'snapshot'));
       setMessage('已将当前本地宇宙保存到你的云端快照。');
@@ -81,6 +90,7 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
     setBusy(true); setMessage('');
     try {
       const response = await fetch('/api/atlas', { credentials: 'include' });
+      if (response.status === 401) { setUser(null); setSessionStatus('anonymous'); }
       const body = await response.json().catch(() => ({})) as { snapshot?: { payload: Atlas } | null; error?: string };
       if (!response.ok) throw new Error(accountError(response, body.error || '读取失败。', 'snapshot'));
       if (!body.snapshot) throw new Error('云端还没有保存过快照。');
@@ -94,14 +104,17 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
     try {
       const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
       if (!response.ok) throw new Error('退出登录暂时失败。');
-      setUser(null); setMessage('已退出登录。本地资料仍保留在这台设备。');
+      setUser(null); setSessionStatus('anonymous'); setMessage('已退出登录。本地资料仍保留在这台设备。');
     } catch (reason) { setMessage(reason instanceof Error ? reason.message : '退出登录暂时失败。'); }
     finally { setBusy(false); }
   };
 
-  if (user) return <section className="account-center" id="account"><p className="overline">SYNC & ACCOUNT</p><h3>{user.email}</h3><p>登录只用于你主动选择的云端同步。本地数据不会因登录而自动上传。</p><div className="account-actions"><button className="capture-button" disabled={busy} onClick={() => void push()}>保存到云端</button><button className="text-btn" disabled={busy} onClick={() => void pull()}>从云端恢复</button><button className="text-btn" disabled={busy} onClick={() => void logout()}>退出本站登录</button></div>{authConfig?.provider === 'authing' && <small>退出本站不等于退出 Authing；再次登录会重新要求认证。公用设备也请退出 Authing。</small>}{message && <p className="account-message">{message}</p>}</section>;
+  const statusText = checking ? '正在确认本站登录状态…' : sessionStatus === 'error' ? '登录状态未知 · 检查失败' : '未登录本站';
+  const checkFeedback = <>{checkError && <p className="account-message" role="status">{checkError}</p>}{!checking && <button className="text-btn" disabled={busy} onClick={() => setRetry(value => value + 1)}>重新检查账户状态</button>}</>;
 
-  if (!authConfig || authConfig.provider === 'authing') return <section className="account-center" id="account"><p className="overline">OPTIONAL CLOUD ACCOUNT</p><h3>登录以保存与恢复云端快照</h3><p>不登录也可使用本地记录。注册、邮箱验证和找回密码在 Authing 页面完成；本站不接收你的密码，登录不会上传笔记。</p><button className="capture-button" disabled={!authConfig?.ready || busy} onClick={() => window.location.assign('/api/auth/start')}>{!authConfig ? '正在检查账户入口…' : authConfig.ready ? '登录 / 注册 ↗' : '账户入口尚未配置'}</button>{message && <p className="account-message" role="status">{message}</p>}<small>点击后跳转至 Authing。本站会收到身份标识及已验证邮箱；云端快照仍需你主动保存。账户状态不代表云端备份已完成。</small></section>;
+  if (user && !checking) return <section className="account-center" id="account"><p className="overline">ACCOUNT VERIFIED</p><h3>已登录本站 ✓</h3><p>当前账户：{user.email}</p><p>本地笔记不会自动上传。登录成功不代表已保存云端快照。</p><div className="account-actions"><button className="capture-button" disabled={busy} onClick={() => void push()}>保存到云端</button><button className="text-btn" disabled={busy} onClick={() => void pull()}>从云端恢复</button><button className="text-btn" disabled={busy} onClick={() => void logout()}>退出本站登录</button></div>{authConfig?.provider === 'authing' && <small>退出本站不等于退出 Authing；再次登录会重新要求认证。公用设备也请退出 Authing。</small>}{message && <p className="account-message" role="status">{message}</p>}{checkFeedback}</section>;
+
+  if (!authConfig || authConfig.provider === 'authing') return <section className="account-center" id="account"><p className="overline">OPTIONAL CLOUD ACCOUNT</p><h3>{statusText}</h3><p>登录后可主动保存与恢复云端快照。不登录也可使用本地记录。注册、邮箱验证和找回密码在 Authing 页面完成；本站不接收你的密码。</p><button className="capture-button" disabled={checking || !authConfig?.ready || busy} onClick={() => window.location.assign('/api/auth/start')}>{checking ? '正在检查账户入口…' : !authConfig ? '账户入口检查失败' : authConfig.ready ? '登录 / 注册 ↗' : '账户入口尚未配置'}</button>{message && <p className="account-message" role="status">{message}</p>}{checkFeedback}<small>点击后跳转至 Authing。只有返回本站并显示“已登录本站”及账户邮箱，才表示本站登录成功；云端快照仍需你主动保存。</small></section>;
 
   return <section className="account-center" id="account"><p className="overline">OPTIONAL CLOUD ACCOUNT</p><h3>{mode === 'login' ? '登录以同步与恢复' : '创建账户以启用云端同步'}</h3><p>不登录也可完整使用本地记录。账户仅用于你主动选择的同步、额度与未来跨设备访问。</p><form onSubmit={event => void submit(event)}><label>邮箱<input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label><label>密码<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={event => setPassword(event.target.value)} minLength={10} required /></label><button className="capture-button" disabled={busy}>{busy ? '正在连接…' : mode === 'login' ? '登录' : '创建账户'}</button></form><button className="text-btn" onClick={() => { setMode(value => value === 'login' ? 'register' : 'login'); setMessage(''); }}>{mode === 'login' ? '没有账户？创建一个' : '已有账户？登录'}</button>{message && <p className="account-message">{message}</p>}<small>登录失败不影响本地笔记、学习与离线保存。若持续出现服务错误，请联系维护者核对线上日志。</small></section>;
 }

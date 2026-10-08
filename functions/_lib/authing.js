@@ -49,6 +49,7 @@ export async function callbackAuth(context) {
   let cfg;
   try { cfg = authingConfig(context.env); } catch { return json({ error: '账户认证配置尚未完成。' }, 503); }
   const fail = code => redirect(`${cfg.origin}/?account_result=${code}`, [flowCookie('', 0)]);
+  let stage = 'flow';
   try {
     if (new URL(context.request.url).origin !== cfg.origin) return fail('invalid');
     const url = new URL(context.request.url);
@@ -62,6 +63,7 @@ export async function callbackAuth(context) {
     if (url.searchParams.has('error')) return fail('cancelled');
     const code = url.searchParams.get('code');
     if (!code || code.length > 4096) return fail('invalid');
+    stage = 'token';
     const tokenResponse = await fetch(`${cfg.issuer}/token`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${btoa(`${encodeURIComponent(cfg.clientId)}:${encodeURIComponent(cfg.secret)}`)}` },
@@ -70,11 +72,13 @@ export async function callbackAuth(context) {
     if (!tokenResponse.ok) return fail('provider');
     const token = await tokenResponse.json();
     if (typeof token.id_token !== 'string' || token.id_token.length > 32768) return fail('invalid');
+    stage = 'verify';
     if (!keys.has(cfg.issuer)) keys.set(cfg.issuer, createRemoteJWKSet(new URL(`${cfg.issuer}/.well-known/jwks.json`), { timeoutDuration: 10000 }));
     const { payload } = await jwtVerify(token.id_token, keys.get(cfg.issuer), { issuer: cfg.issuer, audience: cfg.clientId, algorithms: ['RS256'], requiredClaims: ['exp', 'iat', 'sub', 'nonce'], maxTokenAge: '10m', clockTolerance: 5 });
     verifiedClaims(payload, flow.nonce);
     if (payload.azp !== undefined && payload.azp !== cfg.clientId) return fail('invalid');
     if (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== cfg.clientId) return fail('invalid');
+    stage = 'profile';
     let profile = payload;
     if (typeof profile.email !== 'string' || profile.email_verified !== true) {
       if (typeof token.access_token !== 'string') return fail('verify_email');
@@ -85,6 +89,7 @@ export async function callbackAuth(context) {
     }
     if (profile.email_verified !== true || typeof profile.email !== 'string' || !/^\S+@\S+\.\S+$/.test(profile.email) || profile.email.length > 254) return fail('verify_email');
     const db = context.env.DB;
+    stage = 'identity';
     let user = await db.prepare('SELECT user_id FROM auth_identities WHERE issuer=? AND subject=?').bind(cfg.issuer, payload.sub).first();
     const now = Date.now();
     if (!user) {
@@ -92,6 +97,7 @@ export async function callbackAuth(context) {
       // 不以邮箱认领旧账户/快照；冲突必须走独立的迁移审核。
       if (await db.prepare('SELECT id FROM users WHERE email=?').bind(email).first()) return fail('existing_account');
       const id = crypto.randomUUID();
+      stage = 'account';
       await db.batch([
         db.prepare('INSERT INTO users(id,email,password_hash,password_salt,created_at) VALUES(?,?,?,?,?)').bind(id, email, 'external:authing', random(), now),
         db.prepare('INSERT INTO auth_identities(issuer,subject,user_id,created_at) VALUES(?,?,?,?)').bind(cfg.issuer, payload.sub, id, now),
@@ -99,12 +105,16 @@ export async function callbackAuth(context) {
       ]);
       user = { user_id: id };
     }
+    stage = 'session';
     const session = `v2_${random()}`;
     await db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)').bind(await sessionHash(session), user.user_id, now + 2592000000, now).run();
     return redirect(`${cfg.origin}/?account_result=success`, [flowCookie('', 0), cookie(session)]);
-  } catch {
-    // 不记录 code、token、身份资料、secret 或供应商原始响应。
-    console.error('authing callback failed');
-    return fail('service');
+  } catch (error) {
+    // 仅输出白名单类别和随机排查编号；绝不输出错误原文或请求数据。
+    const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    const allowed = new Set(['ERR_JWT_CLAIM_VALIDATION_FAILED', 'ERR_JWT_EXPIRED', 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED', 'ERR_JOSE_ALG_NOT_ALLOWED', 'ERR_JWKS_NO_MATCHING_KEY', 'ERR_JWKS_TIMEOUT', 'ERR_JWKS_INVALID']);
+    const category = allowed.has(error?.code) ? error.code : error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'NETWORK_TIMEOUT' : error?.message === 'AUTH_IDENTITY_INVALID' ? 'IDENTITY_CLAIMS_INVALID' : ['flow', 'identity', 'account', 'session'].includes(stage) ? 'DATABASE_OPERATION_FAILED' : 'AUTH_OPERATION_FAILED';
+    console.error(JSON.stringify({ event: 'authing_callback_failed', stage, category, ref }));
+    return redirect(`${cfg.origin}/?account_result=service&account_stage=${stage}&account_ref=${ref}`, [flowCookie('', 0)]);
   }
 }

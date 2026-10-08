@@ -63,7 +63,7 @@ function App() {
   const [monthFilter, setMonthFilter] = useState<string | null>(null);
   const [universeLens, setUniverseLens] = useState<UniverseLens>('atlas');
   const [universeZoom, setUniverseZoom] = useState(0);
-  const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(() => new URLSearchParams(window.location.search).has('account_result'));
   const [hiddenReflections, setHiddenReflections] = useState<string[]>([]);
   const [storageReady, setStorageReady] = useState(false);
   const [aiConfig, setAiConfig] = useState<AiConfig>({mode:'local',endpoint:'https://api.deepseek.com',model:'deepseek-flash',apiKey:''});

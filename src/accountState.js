@@ -44,10 +44,22 @@ export function callbackMessage(params) {
     flow: '一次性登录记录不存在、已过期或已被使用。',
     code: '认证服务没有返回有效授权码。'
   };
+  const providerStatuses = {
+    400: 'Authing 返回 400：授权码、回调地址或 PKCE 参数未被接受。',
+    401: 'Authing 返回 401：客户端身份未通过，请核对 App ID、App Secret 与 token 认证方式。',
+    403: 'Authing 返回 403：应用无权完成此次 token 交换。',
+    429: 'Authing 请求过于频繁，请稍后再试。',
+    500: 'Authing token 服务暂时异常（500）。',
+    502: 'Authing token 服务暂时异常（502）。',
+    503: 'Authing token 服务暂时异常（503）。',
+    504: 'Authing token 服务暂时异常（504）。'
+  };
   const stage = stages[params.get('account_stage')];
   const ref = params.get('account_ref');
   const reason = reasons[params.get('account_reason')];
+  const providerStatus = providerStatuses[params.get('account_status')];
   if (result === 'invalid' && reason) message += ` ${reason}`;
+  if (result === 'provider' && providerStatus) message += ` ${providerStatus}`;
   if (['service', 'provider', 'invalid'].includes(result) && stage) message += ` 失败环节：${stage}。`;
   if (['service', 'provider', 'invalid'].includes(result) && /^[a-f0-9]{12}$/.test(ref || '')) message += ` 排查编号：${ref}。`;
   return message;

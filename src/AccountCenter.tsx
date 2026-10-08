@@ -31,7 +31,7 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
     const resultMessage = callbackMessage(url.searchParams);
     if (resultMessage) {
       setMessage(resultMessage);
-      for (const name of ['account_result', 'account_stage', 'account_reason', 'account_ref']) url.searchParams.delete(name);
+      for (const name of ['account_result', 'account_stage', 'account_reason', 'account_status', 'account_ref']) url.searchParams.delete(name);
       window.history.replaceState(null, '', url.href);
     }
   }, []);

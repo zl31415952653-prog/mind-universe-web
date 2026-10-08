@@ -54,7 +54,8 @@ export async function callbackAuth(context) {
   const providerFail = status => {
     const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
     console.error(JSON.stringify({ event: 'authing_provider_rejected', stage, status, ref }));
-    return redirect(`${cfg.origin}/?account_result=provider&account_stage=${stage}&account_ref=${ref}`, [flowCookie('', 0)]);
+    const safeStatus = [400, 401, 403, 429, 500, 502, 503, 504].includes(status) ? String(status) : 'other';
+    return redirect(`${cfg.origin}/?account_result=provider&account_stage=${stage}&account_status=${safeStatus}&account_ref=${ref}`, [flowCookie('', 0)]);
   };
   const invalidFail = reason => {
     const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);

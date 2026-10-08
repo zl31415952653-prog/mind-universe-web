@@ -162,12 +162,14 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
     const providerUrl = new URL(providerRedirect.headers.get('Location'));
     assert.equal(providerUrl.searchParams.get('account_result'),'provider');
     assert.equal(providerUrl.searchParams.get('account_stage'),'token');
+    assert.equal(providerUrl.searchParams.get('account_status'),'other');
     assert.match(providerUrl.searchParams.get('account_ref'),/^[a-f0-9]{12}$/);
     assert.equal(redirectDb.writes.length,0);
     assert.ok(!providerRedirect.headers.get('Set-Cookie').includes('infinity_session='));
     tokenStatus = 401;
     const unavailable = await callbackAuth(context(fakeDb()));
     assert.match(unavailable.headers.get('Location'),/account_result=provider/);
+    assert.equal(new URL(unavailable.headers.get('Location')).searchParams.get('account_status'),'401');
     assert.ok(!(await unavailable.text()).includes('private provider message'));
   } finally { globalThis.fetch = oldFetch; }
 });

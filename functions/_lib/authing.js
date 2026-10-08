@@ -51,11 +51,18 @@ export async function callbackAuth(context) {
   try { cfg = authingConfig(context.env); } catch { return json({ error: '账户认证配置尚未完成。' }, 503); }
   const fail = code => redirect(`${cfg.origin}/?account_result=${code}`, [flowCookie('', 0)]);
   let stage = 'flow';
-  const providerFail = status => {
+  const providerFail = async response => {
+    const status = response.status;
     const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
-    console.error(JSON.stringify({ event: 'authing_provider_rejected', stage, status, ref }));
+    const allowedErrors = new Set(['invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client', 'unsupported_grant_type', 'invalid_scope']);
+    let providerError = 'unknown';
+    try {
+      const body = await response.json();
+      if (allowedErrors.has(body?.error)) providerError = body.error;
+    } catch { /* 供应商非 JSON 响应不外泄。 */ }
+    console.error(JSON.stringify({ event: 'authing_provider_rejected', stage, status, providerError, ref }));
     const safeStatus = [400, 401, 403, 429, 500, 502, 503, 504].includes(status) ? String(status) : 'other';
-    return redirect(`${cfg.origin}/?account_result=provider&account_stage=${stage}&account_status=${safeStatus}&account_ref=${ref}`, [flowCookie('', 0)]);
+    return redirect(`${cfg.origin}/?account_result=provider&account_stage=${stage}&account_status=${safeStatus}&account_error=${providerError}&account_ref=${ref}`, [flowCookie('', 0)]);
   };
   const invalidFail = reason => {
     const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
@@ -84,7 +91,7 @@ export async function callbackAuth(context) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cfg.redirect, code_verifier: flow.verifier, client_id: cfg.clientId, client_secret: cfg.secret })
     });
-    if (!tokenResponse.ok) return providerFail(tokenResponse.status);
+    if (!tokenResponse.ok) return providerFail(tokenResponse);
     const token = await tokenResponse.json();
     if (typeof token.id_token !== 'string' || token.id_token.length > 32768) return fail('invalid');
     stage = 'verify';
@@ -98,7 +105,7 @@ export async function callbackAuth(context) {
     if (typeof profile.email !== 'string' || profile.email_verified !== true) {
       if (typeof token.access_token !== 'string') return fail('verify_email');
       const response = await fetch(`${cfg.issuer}/me`, { headers: { Authorization: `Bearer ${token.access_token}` }, redirect: 'manual', signal: AbortSignal.timeout(10000) });
-      if (!response.ok) return providerFail(response.status);
+      if (!response.ok) return providerFail(response);
       profile = await response.json();
       if (profile.sub !== payload.sub) return fail('invalid');
     }

@@ -54,12 +54,22 @@ export function callbackMessage(params) {
     503: 'Authing token 服务暂时异常（503）。',
     504: 'Authing token 服务暂时异常（504）。'
   };
+  const providerErrors = {
+    invalid_request: 'Authing 判定 token 请求参数不完整或格式不正确。',
+    invalid_client: 'Authing 未认可此应用身份，重点核对 App ID、App Secret 与 token 认证方式。',
+    invalid_grant: 'Authing 未接受授权码，重点核对回调地址、授权码时效与 PKCE。',
+    unauthorized_client: '该应用未获准使用授权码换取 token。',
+    unsupported_grant_type: 'Authing 未启用当前授权类型。',
+    invalid_scope: 'Authing 未接受当前登录权限范围。'
+  };
   const stage = stages[params.get('account_stage')];
   const ref = params.get('account_ref');
   const reason = reasons[params.get('account_reason')];
   const providerStatus = providerStatuses[params.get('account_status')];
+  const providerError = providerErrors[params.get('account_error')];
   if (result === 'invalid' && reason) message += ` ${reason}`;
   if (result === 'provider' && providerStatus) message += ` ${providerStatus}`;
+  if (result === 'provider' && providerError) message += ` OAuth 错误：${params.get('account_error')}。${providerError}`;
   if (['service', 'provider', 'invalid'].includes(result) && stage) message += ` 失败环节：${stage}。`;
   if (['service', 'provider', 'invalid'].includes(result) && /^[a-f0-9]{12}$/.test(ref || '')) message += ` 排查编号：${ref}。`;
   return message;

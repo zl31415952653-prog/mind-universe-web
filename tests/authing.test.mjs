@@ -75,7 +75,7 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
   const {privateKey: wrongKey} = await generateKeyPair('RS256');
   const jwk = {...await exportJWK(publicKey), kid:'fixture-key', alg:'RS256', use:'sig'};
   const oldFetch = globalThis.fetch;
-  let claims = {}, tokenStatus = 200, profileStatus = 200, badSignature = false;
+  let claims = {}, tokenStatus = 200, tokenError = 'private provider message', profileStatus = 200, badSignature = false;
   let tokenCalls = 0;
   globalThis.fetch = async (input, init) => {
     // 对齐 workerd：error 模式在请求发送前就会失败，不能只依赖 Node 行为。
@@ -89,7 +89,7 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
       assert.equal(init.body.get('code_verifier'),'v'.repeat(64));
       assert.equal(init.body.get('client_id'),'synthetic-client');
       assert.equal(init.body.get('client_secret'),'synthetic-secret');
-      if (tokenStatus !== 200) return Response.json({error:'private provider message'}, {status:tokenStatus});
+      if (tokenStatus !== 200) return Response.json({error:tokenError}, {status:tokenStatus});
       const jwt = await new SignJWT({nonce:'synthetic-nonce',email:'fixture@example.test',email_verified:true,...claims})
         .setProtectedHeader({alg:'RS256',kid:'fixture-key'}).setIssuer(issuer).setAudience(claims.aud || 'synthetic-client').setSubject('fixture-subject').setIssuedAt().setExpirationTime('5m').sign(badSignature ? wrongKey : privateKey);
       return Response.json({id_token:jwt,access_token:'synthetic-token'});
@@ -163,13 +163,15 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
     assert.equal(providerUrl.searchParams.get('account_result'),'provider');
     assert.equal(providerUrl.searchParams.get('account_stage'),'token');
     assert.equal(providerUrl.searchParams.get('account_status'),'other');
+    assert.equal(providerUrl.searchParams.get('account_error'),'unknown');
     assert.match(providerUrl.searchParams.get('account_ref'),/^[a-f0-9]{12}$/);
     assert.equal(redirectDb.writes.length,0);
     assert.ok(!providerRedirect.headers.get('Set-Cookie').includes('infinity_session='));
-    tokenStatus = 401;
+    tokenStatus = 401; tokenError = 'invalid_client';
     const unavailable = await callbackAuth(context(fakeDb()));
     assert.match(unavailable.headers.get('Location'),/account_result=provider/);
     assert.equal(new URL(unavailable.headers.get('Location')).searchParams.get('account_status'),'401');
+    assert.equal(new URL(unavailable.headers.get('Location')).searchParams.get('account_error'),'invalid_client');
     assert.ok(!(await unavailable.text()).includes('private provider message'));
   } finally { globalThis.fetch = oldFetch; }
 });

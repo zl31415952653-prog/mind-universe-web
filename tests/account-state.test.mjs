@@ -42,6 +42,9 @@ test('callback text preserves uncertainty and accepts only safe stage and refere
   assert.match(safe, /核验身份签名/);
   assert.match(safe, /abcdef123456/);
   assert.doesNotMatch(safe, /D1/);
+  const provider = callbackMessage(new URLSearchParams('account_result=provider&account_stage=token&account_ref=123456abcdef'));
+  assert.match(provider, /交换认证凭证/);
+  assert.match(provider, /123456abcdef/);
   const unsafe = callbackMessage(new URLSearchParams('account_result=service&account_stage=secret-value&account_ref=private-token'));
   assert.doesNotMatch(unsafe, /secret-value|private-token/);
 });

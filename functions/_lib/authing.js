@@ -50,6 +50,11 @@ export async function callbackAuth(context) {
   try { cfg = authingConfig(context.env); } catch { return json({ error: '账户认证配置尚未完成。' }, 503); }
   const fail = code => redirect(`${cfg.origin}/?account_result=${code}`, [flowCookie('', 0)]);
   let stage = 'flow';
+  const providerFail = status => {
+    const ref = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    console.error(JSON.stringify({ event: 'authing_provider_rejected', stage, status, ref }));
+    return redirect(`${cfg.origin}/?account_result=provider&account_stage=${stage}&account_ref=${ref}`, [flowCookie('', 0)]);
+  };
   try {
     if (new URL(context.request.url).origin !== cfg.origin) return fail('invalid');
     const url = new URL(context.request.url);
@@ -67,10 +72,11 @@ export async function callbackAuth(context) {
     const tokenResponse = await fetch(`${cfg.issuer}/token`, {
       // workerd 不支持 redirect:error；manual 不跟随跳转，非 2xx 在下方拒绝。
       method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10000),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${btoa(`${encodeURIComponent(cfg.clientId)}:${encodeURIComponent(cfg.secret)}`)}` },
-      body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cfg.redirect, code_verifier: flow.verifier })
+      // Authing 控制台配置为 client_secret_post；客户端凭证必须与授权码一起放入表单。
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cfg.redirect, code_verifier: flow.verifier, client_id: cfg.clientId, client_secret: cfg.secret })
     });
-    if (!tokenResponse.ok) return fail('provider');
+    if (!tokenResponse.ok) return providerFail(tokenResponse.status);
     const token = await tokenResponse.json();
     if (typeof token.id_token !== 'string' || token.id_token.length > 32768) return fail('invalid');
     stage = 'verify';
@@ -84,7 +90,7 @@ export async function callbackAuth(context) {
     if (typeof profile.email !== 'string' || profile.email_verified !== true) {
       if (typeof token.access_token !== 'string') return fail('verify_email');
       const response = await fetch(`${cfg.issuer}/me`, { headers: { Authorization: `Bearer ${token.access_token}` }, redirect: 'manual', signal: AbortSignal.timeout(10000) });
-      if (!response.ok) return fail('provider');
+      if (!response.ok) return providerFail(response.status);
       profile = await response.json();
       if (profile.sub !== payload.sub) return fail('invalid');
     }

@@ -40,7 +40,7 @@ export function callbackMessage(params) {
   let message = messages[result] || '请重新发起登录。';
   const stage = stages[params.get('account_stage')];
   const ref = params.get('account_ref');
-  if (result === 'service' && stage) message += ` 失败环节：${stage}。`;
-  if (result === 'service' && /^[a-f0-9]{12}$/.test(ref || '')) message += ` 排查编号：${ref}。`;
+  if (['service', 'provider'].includes(result) && stage) message += ` 失败环节：${stage}。`;
+  if (['service', 'provider'].includes(result) && /^[a-f0-9]{12}$/.test(ref || '')) message += ` 排查编号：${ref}。`;
   return message;
 }

@@ -85,8 +85,10 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
     if (url.endsWith('/token')) {
       tokenCalls++;
       assert.equal(init.redirect,'manual');
-      assert.match(init.headers.Authorization,/^Basic /);
+      assert.equal(init.headers.Authorization,undefined);
       assert.equal(init.body.get('code_verifier'),'v'.repeat(64));
+      assert.equal(init.body.get('client_id'),'synthetic-client');
+      assert.equal(init.body.get('client_secret'),'synthetic-secret');
       if (tokenStatus !== 200) return Response.json({error:'private provider message'}, {status:tokenStatus});
       const jwt = await new SignJWT({nonce:'synthetic-nonce',email:'fixture@example.test',email_verified:true,...claims})
         .setProtectedHeader({alg:'RS256',kid:'fixture-key'}).setIssuer(issuer).setAudience(claims.aud || 'synthetic-client').setSubject('fixture-subject').setIssuedAt().setExpirationTime('5m').sign(badSignature ? wrongKey : privateKey);
@@ -157,7 +159,10 @@ test('signed token callback: success, replay, nonce, signature, audience, verifi
     tokenStatus = 302;
     const redirectDb = fakeDb();
     const providerRedirect = await callbackAuth(context(redirectDb));
-    assert.match(providerRedirect.headers.get('Location'),/account_result=provider/);
+    const providerUrl = new URL(providerRedirect.headers.get('Location'));
+    assert.equal(providerUrl.searchParams.get('account_result'),'provider');
+    assert.equal(providerUrl.searchParams.get('account_stage'),'token');
+    assert.match(providerUrl.searchParams.get('account_ref'),/^[a-f0-9]{12}$/);
     assert.equal(redirectDb.writes.length,0);
     assert.ok(!providerRedirect.headers.get('Set-Cookie').includes('infinity_session='));
     tokenStatus = 401;

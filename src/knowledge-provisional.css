@@ -1,0 +1,32 @@
+.knowledge-card .knowledge-provisional {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  margin: 5px 0 0;
+  border: 1px solid rgba(243, 199, 95, .38);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(243, 199, 95, .09);
+  color: #ffe2a0;
+  font: 11px/1.5 'Noto Serif SC';
+}
+
+.knowledge-focus .knowledge-review-banner {
+  display: inline-flex;
+  width: max-content;
+  margin: 4px 0 10px;
+  border: 1px solid rgba(243, 199, 95, .38);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(243, 199, 95, .09);
+  color: #ffe2a0;
+  font: 12px/1.5 'Noto Serif SC';
+}
+
+.knowledge-focus strong {
+  color: #dce6ff;
+}
+
+.knowledge-focus p {
+  overflow-wrap: anywhere;
+}

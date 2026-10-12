@@ -1,0 +1,77 @@
+// Local-only integration harness: disposable SQLite, real route handlers and Vite UI.
+// Usage: node scripts/test-invite-browser.mjs <path-to-playwright-package>
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { createServer as createVite } from 'vite';
+import { digest } from '../functions/_lib/inviteAuth.js';
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.argv[2] || 'playwright');
+const sqlite = new DatabaseSync(':memory:');
+for (const file of ['0001_cloud_sync.sql','0002_entitlements.sql','0003_authing.sql','0004_invite_accounts.sql']) sqlite.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
+const DB={prepare(sql){const make=args=>({bind:(...args)=>make(args),first:async()=>sqlite.prepare(sql).get(...args)||null,run:async()=>({meta:sqlite.prepare(sql).run(...args)})});return make([]);},async batch(items){sqlite.exec('BEGIN');try{for(const item of items)await item.run();sqlite.exec('COMMIT');}catch(error){sqlite.exec('ROLLBACK');throw error;}}};
+const routes={};
+for(const name of ['config','me','login','register','recover','recovery-code','logout','start','callback'])routes['/api/auth/'+name]=await import('../functions/api/auth/'+name+'.js');
+routes['/api/atlas']=await import('../functions/api/atlas.js');
+const invitation='d'.repeat(64),password='synthetic-browser-test-password',newPassword='synthetic-new-browser-password';
+sqlite.prepare('INSERT INTO account_invites(code_hash,expires_at) VALUES(?,?)').run(await digest(invitation),Date.now()+600000);
+const vite=await createVite({server:{middlewareMode:true},appType:'spa'});
+const server=createServer(async(req,res)=>{
+  const handler=routes[req.url?.split('?')[0]]?.['onRequest'+req.method.charAt(0)+req.method.slice(1).toLowerCase()];
+  if(!handler)return vite.middlewares(req,res);
+  try {let raw='';for await(const chunk of req)raw+=chunk;
+    const request=new Request('http://127.0.0.1:'+server.address().port+req.url,{method:req.method,headers:req.headers,...(raw?{body:raw}:{})});
+    const response=await handler({request,env:{AUTH_PROVIDER:'invite',DB}});
+    res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());
+  }catch {res.writeHead(500);res.end('test harness error');}
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try {
+  const page=await browser.newPage({viewport:{width:1280,height:960}});
+  await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort());
+  const url='http://127.0.0.1:'+server.address().port;
+  await page.goto(url,{waitUntil:'domcontentloaded'});
+  await page.locator('.account-trigger').click();
+  const account=page.locator('#account');
+  await account.getByRole('button',{name:'我有邀请凭证'}).click();
+  await account.getByLabel('用户名', {exact:false}).fill('browser_learner');
+  await account.getByLabel('邀请凭证',{exact:true}).fill(invitation);
+  await account.getByLabel('密码（15–128 个字符）',{exact:true}).fill(password);
+  await account.getByRole('button',{name:'使用邀请创建账号',exact:true}).click();
+  await account.locator('.account-recovery code').waitFor();
+  const recoveryCode=await account.locator('.account-recovery code').innerText();
+  await account.getByRole('button',{name:'我已安全保存，继续'}).click();
+  await account.getByLabel('密码（15–128 个字符）',{exact:true}).fill(password);
+  await account.getByRole('button',{name:'登录',exact:true}).click();
+  await account.getByRole('heading',{name:'已登录本站 ✓'}).waitFor();
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM atlas_snapshots').get().n,0);
+  await page.reload();await page.locator('.account-trigger').click();
+  await account.getByRole('heading',{name:'已登录本站 ✓'}).waitFor();
+  await account.getByRole('button',{name:'主动保存云端快照'}).click();
+  await account.getByText('当前本地数据已保存为此账号的云端快照。',{exact:true}).waitFor();
+  page.on('dialog',dialog=>dialog.accept());
+  await account.getByRole('button',{name:'从云端恢复',exact:true}).click();
+  await account.getByText('已恢复云端快照。',{exact:true}).waitFor();
+  await account.getByRole('button',{name:'退出登录',exact:true}).click();
+  await account.getByRole('button',{name:'忘记密码',exact:true}).click();
+  await account.getByLabel('用户名',{exact:false}).fill('browser_learner');
+  await account.getByLabel('一次性恢复码',{exact:true}).fill(recoveryCode);
+  await account.getByLabel('新密码（15–128 个字符）',{exact:true}).fill(newPassword);
+  await account.getByRole('button',{name:'重置密码并使旧登录失效',exact:true}).click();
+  await account.locator('.account-recovery code').waitFor();
+  assert.notEqual(await account.locator('.account-recovery code').innerText(),recoveryCode);
+  await account.getByRole('button',{name:'我已安全保存，继续'}).click();
+  await account.getByLabel('密码（15–128 个字符）',{exact:true}).fill(newPassword);
+  await account.getByRole('button',{name:'登录',exact:true}).click();
+  await account.getByRole('heading',{name:'已登录本站 ✓'}).waitFor();
+  mkdirSync('tmp/invite-ui',{recursive:true});
+  await account.scrollIntoViewIfNeeded();
+  await account.screenshot({path:'tmp/invite-ui/desktop.png'});
+  await page.setViewportSize({width:390,height:844});
+  await account.screenshot({path:'tmp/invite-ui/mobile.png'});
+  assert.ok(await account.evaluate(el=>el.scrollWidth<=el.clientWidth+2));
+  console.log('PASS: invitation creation, recovery display, login, refresh persistence, manual save/restore, logout, recovery and new-password login; mobile has no account overflow. Disposable local data only.');
+} finally {await browser.close();await vite.close();server.close();sqlite.close();}

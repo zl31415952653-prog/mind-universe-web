@@ -10,11 +10,13 @@ export async function checkAccount(fetcher = fetch, signal) {
   };
   const [config, session] = await Promise.all([
     request('/api/auth/config', body => {
-      if (!body || !['authing', 'legacy'].includes(body.provider) || typeof body.ready !== 'boolean') throw new Error('config');
+      if (!body || !['authing', 'legacy', 'invite', 'disabled'].includes(body.provider) || typeof body.ready !== 'boolean') throw new Error('config');
       return { provider: body.provider, ready: body.ready };
     }),
     request('/api/auth/me', body => {
-      if (!body?.user || typeof body.user.id !== 'string' || !body.user.id || typeof body.user.email !== 'string' || !body.user.email) throw new Error('user');
+      if (!body?.user || typeof body.user.id !== 'string' || !body.user.id) throw new Error('user');
+      if (typeof body.user.username === 'string' && body.user.username) return { id: body.user.id, username: body.user.username };
+      if (typeof body.user.email !== 'string' || !body.user.email) throw new Error('user');
       return { id: body.user.id, email: body.user.email };
     })
   ]);

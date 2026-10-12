@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { Entry, KnowledgeEntry, KnowledgeRelation, Relation, Transition, VoidId } from './domain';
-import { VOIDS, getVoid } from './domain';
+import { VOIDS, getVoid, knowledgeColor } from './domain';
 
 type Lens = 'atlas' | 'connections' | 'path' | 'knowledge';
 interface Props { entries: Entry[]; knowledge: KnowledgeEntry[]; knowledgeRelations: KnowledgeRelation[]; relations: Relation[]; transitions: Transition[]; selectedId?: string; lens: Lens; zoom: number; onSelect: (entry: Entry) => void; onSelectKnowledge: (item: KnowledgeEntry) => void; }
@@ -59,9 +59,9 @@ export default function UniverseCanvas({ entries, knowledge, knowledgeRelations,
         const center = galaxyPositions[item.voidType]; const h = hash(item.id); const angle = (h % 628) / 100 + .4; const radius = 3.4 + ((h >> 4) % 20) / 12;
         const pos = new THREE.Vector3(center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle) * radius * .65, center[2] + .35);
         knowledgePos.set(item.id,pos);
-        const v = getVoid(item.voidType); const focused = lens==='atlas' || (lens==='knowledge' && (!selectedId || focusKnowledge.has(item.id))); const node = new THREE.Mesh(new THREE.OctahedronGeometry(.2), new THREE.MeshBasicMaterial({ color: v.soft, transparent: true, opacity: focused ? .98 : .12 }));
+        const v = getVoid(item.voidType); const color = knowledgeColor(item); const focused = lens==='atlas' || (lens==='knowledge' && (!selectedId || focusKnowledge.has(item.id))); const node = new THREE.Mesh(new THREE.OctahedronGeometry(.2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: focused ? .98 : .12 }));
         node.position.copy(pos); node.userData.knowledge = item; knowledgeGroup.add(node);
-        const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow(v.color), transparent: true, depthWrite: false, opacity: focused ? .36 : .04 })); aura.position.copy(pos); aura.scale.set(.78,.78,1); knowledgeGroup.add(aura);
+        const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow(color), transparent: true, depthWrite: false, opacity: focused ? .36 : .04 })); aura.position.copy(pos); aura.scale.set(.78,.78,1); knowledgeGroup.add(aura);
         item.linkedEntryIds.forEach(id => { const target = entryPos.get(id); if (!target) return; const isFocus=!selectedId || item.linkedEntryIds.includes(selectedId); const geometry = new THREE.BufferGeometry().setFromPoints([pos, target]); const line = new THREE.Line(geometry, new THREE.LineDashedMaterial({ color: v.soft, dashSize: .13, gapSize: .1, transparent: true, opacity: lens==='knowledge' && isFocus ? .95 : lens==='atlas' ? .48 : .06 })); line.computeLineDistances(); lineGroup.add(line); });
       });
       knowledgeRelations.forEach(rel=>{const a=knowledgePos.get(rel.from),b=knowledgePos.get(rel.to);if(!a||!b)return;const color=rel.type==='conflict'?'#f16b70':rel.type==='prerequisite'?'#9ed8ff':rel.type==='analogy'?'#f3c75f':'#c4a0ff';const geometry=new THREE.BufferGeometry().setFromPoints([a,b]);const line=new THREE.Line(geometry,new THREE.LineDashedMaterial({color,dashSize:.12,gapSize:.1,transparent:true,opacity:lens==='atlas'||lens==='knowledge'? .55:.07}));line.computeLineDistances();lineGroup.add(line);});

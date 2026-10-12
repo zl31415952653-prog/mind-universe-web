@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAccount, callbackMessage } from '../src/accountState.js';
 
+test('invite users need no email; config alone never implies login', async () => {
+  const result = await checkAccount(async path => Response.json(path.endsWith('/config') ? {provider:'invite',ready:true} : {user:{id:'synthetic',username:'learner'}}));
+  assert.equal(result.session.status,'ready');
+  assert.deepEqual(result.session.value,{id:'synthetic',username:'learner'});
+});
+
 test('only a valid site user confirms login; config readiness alone does not', async () => {
   const fetcher = userResponse => async path => path.endsWith('/config') ? Response.json({ provider: 'authing', ready: true }) : userResponse;
   const anonymous = await checkAccount(fetcher(Response.json({ user: null }, { status: 401 })));

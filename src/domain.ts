@@ -86,6 +86,8 @@ export interface KnowledgeEntry {
   title: string;
   summary: string;
   voidType: VoidId;
+  /** 个人资料可使用独立星色；未设置时沿用所属七空的颜色。 */
+  colorHex?: string;
   source?: string;
   tags: string[];
   linkedEntryIds: string[];
@@ -95,6 +97,12 @@ export interface KnowledgeEntry {
   domain?: string;
   taxonomy?: string[];
   prerequisites?: string[];
+  /** 文献启发的预置条目先作为暂行素材呈现，逐条核验可在后续维护。 */
+  reviewStatus?: 'provisional' | 'reviewed';
+  evidenceType?: string;
+  evidenceLocator?: string;
+  evidenceLimit?: string;
+  suggestedAction?: string;
 }
 
 /** 知识之间的边必须由用户确认；AI 未来只能提交同样结构的候选边。 */
@@ -116,6 +124,20 @@ export interface LearningMaterial {
   source?: string;
   content: string;
   createdAt: number;
+  referencePack?: 'learning-science-v1';
+}
+
+/** 领域参考快照，不是用户原文或自动建立的知识关系。 */
+export interface LearningReference {
+  id: string;
+  title: string;
+  summary: string;
+  source: string;
+  evidenceLocator: string;
+  evidenceLimit: string;
+  suggestedAction: string;
+  matchedTerms: string[];
+  reviewStatus: 'provisional';
 }
 
 /** AI/本地分析的输出永远是候选；confirmedAt 为空即未被用户确认。 */
@@ -126,9 +148,18 @@ export interface LearningSuggestion {
   summary: string;
   keywords: string[];
   prerequisites: string[];
-  primaryVoid: VoidId;
+  primaryVoid: VoidId | null;
   secondaryVoids: VoidId[];
   rationale: string;
+  analysisMode?: 'local' | 'ai';
+  nextAction?: string;
+  references?: LearningReference[];
+  /** 本地试跑的片段定位；旧候选没有此字段，保持兼容。 */
+  evidence?: { excerpt: string; start: number; page?: number };
+  unitType?: 'concept' | 'claim' | 'method' | 'example' | 'evidence' | 'limit' | 'question';
+  voidAssessments?: Array<{ voidType: VoidId; status: 'candidate' | 'no-evidence' | 'needs-input'; cue?: string }>;
+  /** 未确认候选的人工审核状态；旧数据缺省视为待核对。 */
+  reviewState?: 'pending' | 'deferred' | 'ignored';
   confirmedAt?: number;
   knowledgeEntryId?: string;
 }
@@ -172,6 +203,7 @@ export const VOIDS: Void[] = [
 ];
 
 export const getVoid = (id: VoidId) => VOIDS.find(v => v.id === id) ?? VOIDS[0];
+export const knowledgeColor = (item: KnowledgeEntry) => /^#[0-9a-fA-F]{6}$/.test(item.colorHex ?? '') ? item.colorHex! : getVoid(item.voidType).color;
 
 export const seedEntries: Entry[] = [
   { id: 'seed-1', kind:'emotional', title: '一个尚未命名的困惑', body: '我发现自己总在做很多事，却不确定它们是否指向同一个方向。', primaryVoid: 'void', secondaryVoids: ['mirror'], signal: { emotion: '迷茫', colorName: '靛青', colorHex: '#5968d9', texture: '雾' }, createdAt: Date.now() - 1000 * 60 * 60 * 24 * 5, importance: 4, privacy: defaultPrivacy() },

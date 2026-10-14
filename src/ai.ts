@@ -1,5 +1,5 @@
 import { defaultPrivacy, type DiscoverySuggestion, type Entry, type LearningMaterial, type LearningSuggestion, type Relation, type Transition, type VoidId } from './domain';
-import { learningPrompt } from '../functions/_lib/learningPrompt.js';
+import { learningPrompt } from './learningPrompt';
 import { normalizeLearningUnits, parseLearningJson } from './learningModel';
 import { retrieveLearningReferences } from './learningReferences';
 import { learningModelOptions } from '../functions/_lib/learningModelOptions.js';

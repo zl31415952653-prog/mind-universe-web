@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { normalizeLearningUnits, parseLearningJson } from '../src/learningModel.ts';
 import * as domain from '../src/domain.ts';
-import * as prompt from '../functions/_lib/learningPrompt.js';
+import * as prompt from '../src/learningPrompt.ts';
 import * as references from './learningReferences.module.mjs';
 import * as modelOptions from '../functions/_lib/learningModelOptions.js';
 

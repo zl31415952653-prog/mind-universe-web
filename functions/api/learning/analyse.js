@@ -1,5 +1,5 @@
 import {consume, remaining, restore} from '../../_lib/quota.js';
-import { learningPrompt as prompt } from '../../_lib/learningPrompt.js';
+import { learningPrompt as prompt } from '../../../src/learningPrompt.ts';
 import { sanitizeLearningReferences } from '../../_lib/learningReferences.js';
 import { learningModelOptions } from '../../_lib/learningModelOptions.js';
 

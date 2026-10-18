@@ -23,6 +23,49 @@ export async function checkAccount(fetcher = fetch, signal) {
   return { config, session };
 }
 
+export async function readAccountResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  const isJson = /(?:application|text)\/(?:[\w.+-]*\+)?json\b/i.test(contentType);
+  let data = null;
+  let text = '';
+  if (isJson) {
+    try { data = await response.json(); } catch { /* Report a safe format error below. */ }
+  } else {
+    try {
+      const reader = response.body?.getReader();
+      if (reader) {
+        const first = await reader.read();
+        text = new TextDecoder().decode(first.value?.subarray(0, 1024) || new Uint8Array());
+        await reader.cancel();
+      }
+    } catch { /* Report a safe format error below. */ }
+  }
+
+  if (!response.ok) {
+    if (typeof data?.error === 'string' && data.error.trim()) throw new Error(data.error);
+    if (/error\s*code\s*:\s*1102/i.test(text)) {
+      throw new Error('Cloudflare 已因运行资源上限（错误 1102）中止登录计算。这不是密码错误；请维护者调整云端计算资源或认证实现。本地记录不受影响。');
+    }
+    const reason = isJson ? 'JSON 响应中没有错误说明' : '服务器返回了非 JSON 错误页';
+    throw new Error(`账户接口异常（HTTP ${response.status}，${reason}）。这不是已确认的密码错误；请维护者检查 Cloudflare 预览函数日志。本地记录不受影响。`);
+  }
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`账户接口响应格式异常（HTTP ${response.status}）。登录状态尚未确认；请维护者检查 Cloudflare 预览函数日志。本地记录不受影响。`);
+  }
+  return data;
+}
+
+export function accountActionError(error) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return '云端请求超时或已取消。请检查网络后重试；本地记录不受影响。';
+  }
+  if (error instanceof TypeError) {
+    return '无法连接云端服务。请检查网络或稍后重试；本地记录不受影响，登录状态尚未确认。';
+  }
+  return error instanceof Error ? error.message : '网络连接失败，请重试。';
+}
+
 export function callbackMessage(params) {
   const messages = {
     success: '认证已返回，正在核对本站登录状态；尚未确认登录成功。',

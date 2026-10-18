@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { Atlas } from './storage';
-import { checkAccount } from './accountState.js';
+import { accountActionError, checkAccount, readAccountResponse } from './accountState.js';
 import './account.css';
 type User = { id: string; username?: string; email?: string };
 type Props = { atlas: Atlas; onRestore: (atlas: Atlas) => void };
@@ -34,19 +34,21 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
   }, [retry]);
   async function request(path: string, body?: unknown, method = 'POST') {
     const response = await fetch(path, { method, credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(20000), headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) { if (response.status === 401 && path === '/api/atlas') setUser(null); throw new Error(data.error || '操作未完成，请稍后重试。'); }
-    return data;
+    try { return await readAccountResponse(response); }
+    catch (error) {
+      if (response.status === 401 && path === '/api/atlas') setUser(null);
+      throw error;
+    }
   }
   async function run(action: () => Promise<void>) {
     setBusy(true); setMessage('');
-    try { await action(); } catch (error) { setMessage(error instanceof Error ? error.message : '网络连接失败，请重试。'); }
+    try { await action(); } catch (error) { setMessage(accountActionError(error)); }
     finally { setBusy(false); setPassword(''); }
   }
   function submit(event: FormEvent) {
     event.preventDefault();
     void run(async () => {
-      const data = await request(`/api/auth/${mode}`, { username, password, invitation, recoveryCode: recoveryInput });
+      const data = await request(`/api/auth/${mode}`, { username, password, invitation, recoveryCode: recoveryInput }) as { recoveryCode?: string; message: string };
       setInvitation(''); setRecoveryInput('');
       if (data.recoveryCode) { setRecoveryCode(data.recoveryCode); setMessage(data.message); if (mode === 'recover') setUser(null); setMode('login'); return; }
       const { session } = await checkAccount(fetch, AbortSignal.timeout(12000));
@@ -63,7 +65,7 @@ export default function AccountCenter({ atlas, onRestore }: Props) {
     {recoveryCode ? <div className="account-recovery" role="status"><h4>请现在单独保存一次性恢复码</h4><p>请保存到密码管理器或安全的离线位置，不要发给维护者。此码不进入笔记备份，也不会再次显示。使用后旧码立即失效；同时丢失密码和恢复码时，不能仅凭口头声明重置账号。</p><code>{recoveryCode}</code><button className="capture-button" onClick={() => setRecoveryCode('')}>我已安全保存，继续</button></div> : <>
     {user && <><p>当前账号：{user.username || user.email}</p><div className="account-actions">
       <button className="capture-button" disabled={busy || checking} onClick={() => void run(async () => { await request('/api/atlas', atlas, 'PUT'); setMessage('当前本地数据已保存为此账号的云端快照。'); })}>主动保存云端快照</button>
-      <button className="text-btn" disabled={busy || checking} onClick={() => { if (!confirm('恢复云端快照将替换本机数据。请先导出备份。继续吗？')) return; void run(async () => { const data = await request('/api/atlas', undefined, 'GET'); const next = data.snapshot?.payload; if (!next || !['entries','knowledge','relations','transitions'].every(key => Array.isArray(next[key]))) throw new Error('没有可恢复的有效快照。'); onRestore(next); setMessage('已恢复云端快照。'); }); }}>从云端恢复</button>
+      <button className="text-btn" disabled={busy || checking} onClick={() => { if (!confirm('恢复云端快照将替换本机数据。请先导出备份。继续吗？')) return; void run(async () => { const data = await request('/api/atlas', undefined, 'GET') as { snapshot?: { payload?: Atlas } }; const next = data.snapshot?.payload; if (!next || !['entries','knowledge','relations','transitions'].every(key => Array.isArray((next as unknown as Record<string, unknown>)[key]))) throw new Error('没有可恢复的有效快照。'); onRestore(next); setMessage('已恢复云端快照。'); }); }}>从云端恢复</button>
       <button className="text-btn" disabled={busy} onClick={() => void run(async () => { await request('/api/auth/logout'); setUser(null); setMode('login'); setMessage('已退出；本机记录仍保留。'); })}>退出登录</button>
       {user.username && <button className="text-btn" disabled={busy} onClick={() => changeMode('recovery-code')}>重新生成恢复码</button>}
     </div></>}

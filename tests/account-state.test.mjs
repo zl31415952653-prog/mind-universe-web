@@ -1,6 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAccount, callbackMessage } from '../src/accountState.js';
+import { accountActionError, checkAccount, callbackMessage, readAccountResponse } from '../src/accountState.js';
+
+test('account actions replace browser transport errors with clear local-first guidance', () => {
+  assert.match(accountActionError(new TypeError('Failed to fetch')), /无法连接云端服务/);
+  assert.match(accountActionError(new DOMException('aborted', 'TimeoutError')), /请求超时/);
+  assert.equal(accountActionError(new Error('账号不存在。')), '账号不存在。');
+});
+
+test('account API keeps normal JSON errors and identifies non-JSON Cloudflare failures without exposing bodies', async () => {
+  await assert.rejects(readAccountResponse(Response.json({ error: '用户名或密码不正确。' }, { status: 401 })), /用户名或密码不正确/);
+  await assert.rejects(
+    readAccountResponse(new Response('<html>edge failure</html>', { status: 502, headers: { 'Content-Type': 'text/html' } })),
+    error => /HTTP 502/.test(error.message) && /非 JSON 错误页/.test(error.message) && !/edge failure/.test(error.message)
+  );
+  await assert.rejects(
+    readAccountResponse(new Response('error code: 1102', { status: 503, headers: { 'Content-Type': 'text/plain' } })),
+    error => /错误 1102/.test(error.message) && /不是密码错误/.test(error.message)
+  );
+  await assert.rejects(
+    readAccountResponse(Response.json({ detail: 'private diagnostic' }, { status: 503 })),
+    error => /HTTP 503/.test(error.message) && !/private diagnostic/.test(error.message)
+  );
+});
 
 test('invite users need no email; config alone never implies login', async () => {
   const result = await checkAccount(async path => Response.json(path.endsWith('/config') ? {provider:'invite',ready:true} : {user:{id:'synthetic',username:'learner'}}));

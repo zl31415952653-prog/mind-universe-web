@@ -1,5 +1,6 @@
 import type { AuthorizationAuditEvent, DiscoverySuggestion, Entry, KnowledgeEntry, KnowledgeRelation, LearningMaterial, LearningProject, LearningSuggestion, LearningTask, Relation, Transition } from './domain';
 import { defaultPrivacy, seedEntries, seedRelations } from './domain';
+import { writeWithLegacyMirror } from './storageMirror.js';
 
 const LEGACY_KEY = 'infinity-v2-atlas';
 const LEGACY_REVIEW_KEY = 'infinity-v2-hidden-reflections';
@@ -76,8 +77,7 @@ export async function hydrateAtlas(): Promise<Atlas> {
   const legacy = loadAtlas(); await write('atlas', ATLAS_KEY, legacy); return legacy;
 }
 export function saveAtlas(next: Atlas) {
-  localStorage.setItem(LEGACY_KEY, JSON.stringify(next));
-  return write('atlas', ATLAS_KEY, next);
+  return writeWithLegacyMirror(LEGACY_KEY, JSON.stringify(next), () => write('atlas', ATLAS_KEY, next));
 }
 export async function hydrateHiddenReflections(): Promise<string[]> {
   const saved = await read<string[]>('preferences', REVIEW_KEY);
@@ -86,6 +86,5 @@ export async function hydrateHiddenReflections(): Promise<string[]> {
   await write('preferences', REVIEW_KEY, legacy); return legacy;
 }
 export function saveHiddenReflections(ids: string[]) {
-  localStorage.setItem(LEGACY_REVIEW_KEY, JSON.stringify(ids));
-  return write('preferences', REVIEW_KEY, ids);
+  return writeWithLegacyMirror(LEGACY_REVIEW_KEY, JSON.stringify(ids), () => write('preferences', REVIEW_KEY, ids));
 }

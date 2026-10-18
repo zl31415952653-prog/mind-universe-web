@@ -9,7 +9,7 @@ const stopWords = new Set([
   '随后', '获得', '写下', '适合', '复杂', '内容', '系统', '用户'
 ]);
 const voidSignals: Array<{ id: VoidId; terms: string[]; rationale: string }> = [
-  { id: 'void', terms: ['未知', '入门', '概念', '是什么', '问题', '基础', 'unknown', 'unfamiliar', 'question'], rationale: '材料中包含陌生概念、问题或入门线索，适合作为待探索内容。' },
+  { id: 'void', terms: ['？', '?', '未知', '入门', '概念', '是什么', '问题', '基础', 'unknown', 'unfamiliar', 'question'], rationale: '材料中包含明确提问、陌生概念或入门线索，适合作为待探索内容。' },
   { id: 'silence', terms: ['定义', '原理', '总结', '结论', '掌握', '方法', 'definition', 'principle', 'recall'], rationale: '材料在陈述相对稳定的定义、原理或可归档的方法。' },
   { id: 'fracture', terms: ['但是', '矛盾', '争议', '区别', '误解', '错误', '反而', '比较', 'however', 'contrast', 'conflict', 'misconception'], rationale: '材料出现了对比、争议或容易混淆之处，值得单独辨析。' },
   { id: 'flow', terms: ['过程', '步骤', '发展', '变化', '正在', '阶段', '随后', '先', 'planning', 'plan', 'process', 'steps', 'practice'], rationale: '材料强调过程、步骤或尚在发展的状态。' },

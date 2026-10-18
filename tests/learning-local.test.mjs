@@ -24,6 +24,14 @@ test('没有字面线索时保持未分类，不猜测七空', () => {
   assert.ok(item.voidAssessments.every(assessment => assessment.status === 'no-evidence'));
 });
 
+test('明确问句成为未知空候选，但仍需人工核对', () => {
+  const [item] = analyseMaterial({ id: 'question', projectId: 'sample', title: '问句', kind: 'text', createdAt: 0, content: '什么是工作记忆？' });
+  assert.equal(item.unitType, 'question');
+  assert.equal(item.primaryVoid, 'void');
+  assert.equal(item.voidAssessments.find(assessment => assessment.voidType === 'void')?.cue, '？');
+  assert.match(item.rationale, /词语匹配不等于理解原意/);
+});
+
 test('过长材料不静默截断', () => {
   const material = { id: 'long', projectId: 'sample', title: '长材料', kind: 'text', createdAt: 0, content: '这是一个需要阅读的句段。'.repeat(31) };
   assert.throws(() => analyseMaterial(material), /最多分析 30 个句段/);

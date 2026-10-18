@@ -9,6 +9,7 @@ import { onRequestPost as logout } from '../functions/api/auth/logout.js';
 import { onRequestGet as config } from '../functions/api/auth/config.js';
 import { onRequestGet as getAtlas, onRequestPut as putAtlas } from '../functions/api/atlas.js';
 import { consume } from '../functions/_lib/quota.js';
+import { onRequestPost as completeChat } from '../functions/api/chat/completions.js';
 const origin = 'https://test.example';
 const password = 'synthetic-test-password-not-real';
 function fixture() {
@@ -112,6 +113,26 @@ test('snapshots stay isolated, login does not upload, AI has independent finite 
   assert.equal((await consume(f.context({},first.cookie),'record')).error.status,429);
   assert.ok((await consume(f.context({},second.cookie),'record')).user);
   f.sqlite.close();
+});
+test('hosted AI network failures time out and refund the reserved quota', async () => {
+  const f = fixture();
+  f.env.DEEPSEEK_API_KEY = 'synthetic-key';
+  await f.register();
+  const signed = await f.login();
+  const context = f.context({ messages: [{ role: 'user', content: 'synthetic test' }] }, signed.cookie);
+  const oldFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, init) => { assert.ok(init.signal); throw new TypeError('Failed to fetch'); };
+    const response = await completeChat(context);
+    assert.equal(response.status, 502);
+    assert.match((await response.json()).error.message, /已退还本次额度/);
+    assert.equal(f.sqlite.prepare('SELECT ai_record_credits FROM entitlements').get().ai_record_credits, 3);
+
+    globalThis.fetch = async () => new Response('upstream unavailable', { status: 503 });
+    const failedUpstream = await completeChat(f.context({ messages: [{ role: 'user', content: 'synthetic test' }] }, signed.cookie));
+    assert.equal(failedUpstream.status, 502);
+    assert.equal(f.sqlite.prepare('SELECT ai_record_credits FROM entitlements').get().ai_record_credits, 3);
+  } finally { globalThis.fetch = oldFetch; f.sqlite.close(); }
 });
 test('concurrent recovery consumes the code only once and a consumed invitation is blocked by the database',async()=>{
   const f=fixture(); const created=await(await f.register()).json();
